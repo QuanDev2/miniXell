@@ -8,10 +8,13 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 1, step 1.4 (`pipeline/convert.py` written and run).
-- **Uncommitted:** `pipeline/convert.py` and this log update.
-- **Next:** step 1.5 (inspect the Parquet output). Brief the user first, then
-  wait for an explicit go (see [AGENTS.md](../AGENTS.md)).
+- **Done:** Phase 1, step 1.5 (inspect the Parquet output). Findings:
+  [notes/norman-dataset.md](notes/norman-dataset.md#processed-output-step-15).
+- **Target-gene fix applied** (user chose option A): `convert.py` now keeps
+  the 2,000 most variable genes plus all targeted genes; 102 of 105 targets
+  kept. 3 targets use old gene names (see Accepted limitations).
+- **Uncommitted:** `pipeline/convert.py`, notes, AGENTS.md, and this log update.
+- **Next:** Phase 2 (legacy reference). Brief the user first.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -25,15 +28,15 @@ Chat called these steps "3.1–3.5"; same steps.
 | 0.4 | Smoke test: Spark sum 1..1000 = 500500; `sbt --version` | Done | no files |
 | 0.5 | Commit check | Done | nothing to commit |
 
-## Phase 1: Data → Parquet (in progress)
+## Phase 1: Data → Parquet (done)
 
 | Step | What | Status | Commit |
 |---|---|---|---|
 | 1.1 | Add anndata, scanpy, pyarrow | Done | `482e3fb` |
 | 1.2 | `pipeline/download.py`; download Norman h5ad (699 MB, MD5 verified) | Done | `482e3fb` |
 | 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | `62d333e` |
-| 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | uncommitted |
-| 1.5 | Inspect Parquet output: row counts, sizes, sample rows | Next | |
+| 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | `95e0ce1` |
+| 1.5 | Inspect Parquet output; target-gene check failed → fixed (2,000 variable + targeted genes; 102/105 targets) | Done | uncommitted |
 
 ## Environment (this machine)
 
@@ -55,9 +58,9 @@ Chat called these steps "3.1–3.5"; same steps.
 - Data: `data/raw/NormanWeissman2019_filtered.h5ad` (git-ignored). Re-fetch
   with `uv run python -m pipeline.download norman`.
 - Processed data: `data/processed/norman/` (git-ignored), rebuilt with
-  `uv run python -m pipeline.convert norman` (~80 s, peak 6.2 GB):
+  `uv run python -m pipeline.convert norman` (~50 s, peak 7.6 GB):
   - `cells.parquet`: 111,391 rows (cell_id, perturbation, is_control, gemgroup), 1.3 MB;
-  - `expression.parquet`: 18,468,826 rows (cell_id, gene, value), 23 row groups, 89.4 MB;
+  - `expression.parquet`: 20,142,590 rows (cell_id, gene, value), 2,066 genes, 89.8 MB;
   - `cell_pcs.parquet`: 111,391 rows (cell_id, pc_1…pc_50), 34.7 MB.
 
 ## Decisions not in PLAN/ARCHITECTURE
@@ -76,7 +79,17 @@ Chat called these steps "3.1–3.5"; same steps.
 - Converter choices: `gemgroup` kept in `cells.parquet`; no per-gene
   standardizing before PCA; PCA seed 0; one file per table; expression
   `cell_id`/`gene` stored dictionary-encoded, `value` as float32.
+- Gene list = 2,000 most variable genes + all targeted genes (2,066 total),
+  so each perturbation's own target appears in its signature. User approved.
 
 ## Open items
 
 - Claude access (Anthropic API vs Bedrock): decide in phase 6.
+
+## Accepted limitations
+
+- 3 targets labeled with old gene names aren't matched in the gene list:
+  `C19orf26` (`CBARP`), `C3orf72` (`FOXL2NB`), `KIAA1804` (`RP5-862P8.2`,
+  inferred). Their perturbations still get signatures and distances; they're
+  only excluded from the "target moves in its own signature" sanity check.
+  User accepted 102/105 (MVP over perfection).

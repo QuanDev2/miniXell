@@ -65,3 +65,51 @@ CC BY 4.0). Inspected 2026-10-18 (Phase 1, step 1.3).
   this dataset. Real names to use instead: e.g. `CEBPE`, `BAK1`, `CEBPA`.
 - `gemgroup` gives real batch labels, so batch-aware control comparison
   (previously "not checked") is possible.
+
+## Processed output (step 1.5)
+
+Checked 2026-10-18 against `data/processed/norman/` from `95e0ce1`.
+
+**Consistency: all pass.**
+
+- `cells`: 111,391 unique `cell_id`s; `is_control` matches
+  `perturbation == "control"`.
+- Every `expression` `cell_id` exists in `cells`; every cell has at least one
+  expression row.
+- `cell_pcs` has the same `cell_id`s in the same order as `cells`.
+- Per-perturbation counts equal the raw file minus the quality filter
+  (237 labels; KLF1 1,959; control 11,849).
+
+**Values.**
+
+- 18,468,826 rows, all > 0; min 0.144, max 8.545 (log scale); exactly 2,000
+  distinct genes; median 165 non-zero genes per cell.
+
+**Parquet internals (`expression.parquet`).**
+
+- `cell_id`, `gene`: dictionary-encoded strings (int32 indices); `value`:
+  float32.
+- 23 row groups of 1,048,576 rows (last 222,302); Snappy compression;
+  dictionary + run-length encodings.
+- Reading one column: 0.04 s; all three: 0.16 s (warm cache).
+
+**Target genes: check failed, then fixed.**
+
+- First run: only 36 of the 105 targeted genes were among the 2,000 most
+  variable genes. 69 were missing, including `BAK1`, `CEBPB`, `SET`, `FOSB`,
+  `ARID1A`.
+- Cause: gene selection measures variability across all cells, and each
+  target is turned up in only its own perturbation's cells (~0.3% of all
+  cells), so its overall variability stays modest.
+- Fix (user chose option A): `convert.py` keeps the 2,000 most variable genes
+  plus every targeted gene. Re-run: 2,066 genes (2,000 + 66 targets outside
+  them), 20,142,590 expression rows, 89.8 MB, peak memory 7.6 GB, 48 s.
+  Consistency checks above still hold.
+- Result: 102 of 105 targets kept. The other 3 are labeled with old gene
+  names that the gene list stores under newer names:
+
+  | Label name | Gene list name | Evidence |
+  |---|---|---|
+  | `C19orf26` | `CBARP` | mygene.info alias lookup |
+  | `C3orf72` | `FOXL2NB` | mygene.info alias lookup |
+  | `KIAA1804` | `RP5-862P8.2` | [INFERENCE] KIAA1804 = MAP3K21 (MLK4), Ensembl ENSG00000143674, which the gene list names `RP5-862P8.2`; mygene.info doesn't list KIAA1804 as an alias |

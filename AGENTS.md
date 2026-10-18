@@ -28,6 +28,13 @@ part of the job, not optional.
 - Run steps hands-off only if the user explicitly says so, and only for the
   steps they name.
 
+## MVP first
+
+- This is an MVP for an interview demo: speed over perfection.
+- Prefer the quickest correct option. For non-blocking imperfections, state
+  the impact in one line and recommend accepting; don't hold up progress.
+- Only stop for issues that would make results wrong or block the next phase.
+
 ## Progress log
 
 - [docs/PROGRESS.md](docs/PROGRESS.md) is the handoff log. Read it first to

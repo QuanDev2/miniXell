@@ -1,6 +1,6 @@
 """Convert a downloaded h5ad dataset into Spark-ready Parquet files.
 
-data/raw/<file>.h5ad -> filter -> normalize + log -> top genes -> PCA
+data/raw/<file>.h5ad -> filter -> normalize + log -> top genes + targeted genes -> PCA
   -> data/processed/<name>/{cells,expression,cell_pcs}.parquet
 """
 
@@ -40,10 +40,10 @@ def log(start: float, message: str) -> None:
 
 
 def preprocess(adata: ad.AnnData, cols: dict, start: float) -> ad.AnnData:
-    """Filter cells, normalize, keep top genes, compute PCs.
+    """Filter cells, normalize, keep top genes plus targeted genes, compute PCs.
 
     In: raw-count AnnData, obs column names, start time.
-    Out: AnnData with log-normalized top genes in X and PCs in obsm["X_pca"].
+    Out: AnnData with log-normalized kept genes in X and PCs in obsm["X_pca"].
     """
     keep = adata.obs[cols["mito"]] < MITO_MAX
     adata = adata[keep].copy()
@@ -55,12 +55,28 @@ def preprocess(adata: ad.AnnData, cols: dict, start: float) -> ad.AnnData:
     log(start, f"normalized to {TARGET_SUM} per cell and log-transformed")
 
     sc.pp.highly_variable_genes(adata, n_top_genes=N_TOP_GENES)
-    adata = adata[:, adata.var["highly_variable"]].copy()
-    log(start, f"kept {adata.n_vars} most variable genes")
+    targets = target_genes(adata.obs[cols["label"]], cols["control"])
+    missing = sorted(targets - set(adata.var_names))
+    if missing:
+        log(start, f"targets absent from the dataset's genes: {missing}")
+    is_target = adata.var_names.isin(targets)
+    keep_genes = adata.var["highly_variable"].to_numpy() | is_target
+    added = int((is_target & ~adata.var["highly_variable"].to_numpy()).sum())
+    adata = adata[:, keep_genes].copy()
+    log(start, f"kept {adata.n_vars} genes: {N_TOP_GENES} most variable + {added} targeted genes outside them")
 
     sc.pp.pca(adata, n_comps=N_PCS, random_state=SEED)
     log(start, f"computed {N_PCS} principal components")
     return adata
+
+
+def target_genes(labels, control: str) -> set[str]:
+    """Collect genes deliberately changed across all perturbations.
+
+    In: per-cell perturbation labels, control label.
+    Out: gene symbols; two-gene labels split on "_".
+    """
+    return {gene for label in set(labels.astype(str)) if label != control for gene in label.split("_")}
 
 
 def write_cells(adata: ad.AnnData, cols: dict, out: Path) -> None:
