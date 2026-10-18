@@ -1,0 +1,12 @@
+services:
+  mongo:
+    image: mongo:8
+    container_name: minixell-mongo
+    ports:
+      - "127.0.0.1:27017:27017" # localhost only
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
