@@ -160,7 +160,7 @@ stored in order, so the API never sorts.
   "dataset": "NormanWeissman2019",
   "name": "KLF1",
   "target_genes": ["KLF1"],
-  "cell_count": 1960,
+  "cell_count": 1959,
   "sampled_cell_count": 100,
   "top_genes": [
     { "gene": "KLF1", "change": 3.10 },
@@ -199,8 +199,8 @@ Rules:
 
 - Controls are the baseline, not a perturbation; no document.
 - A perturbation never appears in its own `similar` lists.
-- The target gene stays in `top_genes`; it usually ranks first, which doubles
-  as a sanity check.
+- The target gene stays in `top_genes` when it ranks there (77 of 102
+  checkable targets in Norman); genes it switches on can move more than it does.
 - Full 2,000-gene signatures and all pairwise distances stay in Parquet;
   MongoDB holds only what the API serves.
 - Document size stays a few KB, far below MongoDB's 16 MB limit.

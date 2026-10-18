@@ -8,10 +8,11 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0 and Phase 1. Last commit for Phase 1: `cbc9338`.
-- **Uncommitted:** nothing.
-- **Next:** Phase 2 (legacy reference). Define its steps (see "Notes for
-  Phase 2" below), brief the user, wait for an explicit go per step.
+- **Done:** Phase 0, Phase 1, step 2.1. Last commit for Phase 1: `cbc9338`.
+- **Uncommitted:** step 2.1 (`pipeline/legacy_signatures.py`, ARCHITECTURE.md
+  KLF1 count and target-rank rule, this file).
+- **Next:** step 2.2 (Euclidean distance + 20 closest). Brief the user, wait
+  for an explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -34,6 +35,19 @@ Chat called these steps "3.1–3.5"; same steps.
 | 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | `62d333e` |
 | 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | `95e0ce1` |
 | 1.5 | Inspect Parquet output; target-gene check failed → fixed (2,000 variable + targeted genes; 102/105 targets) | Done | `cbc9338` |
+
+## Phase 2: Legacy reference (in progress)
+
+Run: `uv run python -m pipeline.legacy_signatures norman` (~6 s, peak 2.4 GB).
+Output: `data/processed/norman/legacy/`.
+
+| Step | What | Status | Commit |
+|---|---|---|---|
+| 2.1 | Gene averages → signatures → top 50 genes → target check; writes `perturbations` (236 rows), `signatures` (487,576), `top_genes` (11,800) | Done | uncommitted |
+| 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean`, `similar_euclidean` | Next | |
+| 2.3 | Pinned-hash sampling rule (≤100 cells per perturbation), documented in CONCEPTS.md; writes `sampled_cells` | | |
+| 2.4 | E-distance on sampled cells' 50 PCs → 20 closest each; writes `edistance`, `similar_edistance` | | |
+| 2.5 | Clean full rerun; row counts, wall time, peak memory (scale-benchmark baseline) | | |
 
 ## Environment (this machine)
 
@@ -78,6 +92,11 @@ Chat called these steps "3.1–3.5"; same steps.
   `cell_id`/`gene` stored dictionary-encoded, `value` as float32.
 - Gene list = 2,000 most variable genes + all targeted genes (2,066 total),
   so each perturbation's own target appears in its signature. User approved.
+- Step 2.1 parity contract for Spark: sums in float64; output long tables
+  (one row per perturbation × gene); top-gene rank = largest absolute change,
+  ties by gene name A→Z; `rank` stored as a column (row order isn't kept).
+- `legacy/` = outputs of the legacy script; Spark writes its own copy in
+  phase 3 and parity compares them.
 
 ## Open items
 
@@ -116,8 +135,12 @@ Details that matter for correctness:
   can reproduce. 12 perturbations have fewer than 100 cells; they use all.
 - Similar lists: per perturbation, 20 closest others per metric; never itself;
   controls excluded (236 perturbations).
-- Sanity check: each single-gene perturbation's own target ranks high in its
-  signature (102 targets available; see Accepted limitations).
+- Sanity check result (step 2.1): of 102 checkable targets, 21 rank #1, 51
+  top 10, 77 top 50; 100 changed upward. Median target goes from expressed in
+  11% of control cells to 52% of its perturbed cells. Ranks are modest because
+  genes a target switches on can move more (KLF1 ranks #4 behind hemoglobin
+  genes). ~7 targets barely move (e.g. ATL1, ZBTB25, PLK4: weak activation);
+  CKS1B and CELF2 go slightly down. Hand check of HBG1 in KLF1 matched exactly.
 - Output (answer key) goes under `data/processed/norman/` (git-ignored),
   e.g. a `legacy/` folder in Parquet.
 
