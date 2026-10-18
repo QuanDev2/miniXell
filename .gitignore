@@ -1,1 +1,26 @@
+# Machine-specific settings and secrets
 .env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Datasets (downloaded and converted locally)
+data/
+
+# Spark local-mode leftovers
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Scala / sbt build output
+target/
+.bsp/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
