@@ -1,0 +1,217 @@
+# miniXell Implementation Plan
+
+Learn by building. Each phase produces something that runs; concepts are
+explained when the phase needs them.
+
+Each phase lists:
+
+- **Build**: what exists at the end.
+- **Learn along the way**: concepts the phase teaches.
+- **Done when**: observable check.
+- **Interview line**: what the phase lets you say with evidence.
+
+## MVP goal
+
+Four things to show:
+
+1. Parity test passing, plus a bug it caught.
+2. Scale chart: legacy vs Spark, time and peak memory.
+3. Three-way chart: E-distance as plain Python vs grouped pandas vs Scala.
+4. Live API call: a perturbation's similar perturbations and Claude's
+   explanation.
+
+## Repo layout
+
+```
+miniXell/
+├── README.md
+├── docs/                    # architecture, plan, notes/
+├── data/                    # downloaded + converted datasets (git-ignored)
+├── pipeline/
+│   ├── convert.py           # h5ad → Parquet
+│   ├── legacy_signatures.py # single-machine reference
+│   ├── spark_signatures.py  # PySpark job
+│   └── load_mongo.py        # results → MongoDB
+├── scala/edistance/         # sbt project → jar loaded by PySpark
+├── benchmarks/              # scale + three-way scripts, results/
+├── api/                     # FastAPI app
+├── tests/                   # unit, parity, API; fixtures/ = tiny dataset
+├── docker-compose.yml       # local MongoDB
+├── pyproject.toml
+└── .github/workflows/ci.yml
+```
+
+## Datasets
+
+From scPerturb (Zenodo record 13350497).
+
+| Use | File | Size |
+|---|---|---|
+| Development, parity, three-way benchmark | `NormanWeissman2019_filtered.h5ad` | 666 MB |
+| Scale benchmark | `ReplogleWeissman2022_K562_essential.h5ad` | 1.5 GB |
+
+---
+
+## Phase 0: Toolchain and skeleton (0.5 day)
+
+**Build**
+- Python 3.12 via `uv`, Java 17 (Spark needs it), Docker Desktop, sbt.
+- Repo layout, `.gitignore`, `pyproject.toml`.
+- `docker-compose.yml` running MongoDB.
+
+**Learn along the way**
+- Python packaging and virtual environments vs .NET projects and NuGet.
+- Docker and docker-compose.
+- Why Spark needs Java.
+
+**Done when**: `docker compose up` starts MongoDB; `uv run python -c "import pyspark"` works; `sbt --version` works.
+
+**Interview line**: "Local environment matches production through containers."
+
+## Phase 1: Data → Parquet (0.5 day)
+
+**Build**
+- `pipeline/convert.py`: download the Norman h5ad; scale counts (per 10,000,
+  then log); keep the 2,000 most variable genes; compute 50 principal
+  components per cell; write `cells.parquet`, `expression.parquet` (non-zero
+  values only), `cell_pcs.parquet`.
+- Same script handles the Replogle file for phase 4.
+
+**Learn along the way**
+- h5ad structure; sparse data (store only non-zeros).
+- Parquet: columns, compression, row groups; inspect a file with `pyarrow`.
+- Wide vs long tables.
+
+**Done when**: three Parquet files exist; cell, gene, and perturbation counts printed and sane.
+
+**Interview line**: "Converted a scientific format into a Spark-ready columnar layout, like your Parquet work on Tahoe-100M."
+
+## Phase 2: Legacy reference (0.5 day)
+
+**Build**
+- `pipeline/legacy_signatures.py` (pandas, all in memory):
+  signatures → top 50 genes per perturbation → Euclidean distance between
+  signatures → E-distance on sampled cells' principal components → top 20
+  matches per metric.
+- Deterministic cell sampling rule (up to 100 cells per perturbation, chosen
+  by a fixed hash of cell_id), documented for reuse by Spark.
+- Saved output = the answer key.
+
+**Learn along the way**
+- pandas group-by vs LINQ `GroupBy`.
+- Log fold change; Euclidean distance; E-distance.
+
+**Done when**: answer key written; spot check: each single-gene perturbation's own target gene moves strongly in its signature.
+
+**Interview line**: "Built the single-machine baseline first and froze its outputs as the reference."
+
+## Phase 3: PySpark job + parity (1 day)
+
+**Build**
+- `pipeline/spark_signatures.py` in local mode: read Parquet → join cells to
+  expression → (sum, count) per perturbation and gene → broadcast control
+  averages → signatures → top 50 genes (window function) → Euclidean distance
+  → top 20 matches.
+- `tests/test_parity.py`: values within tolerance, identical top-10 gene
+  rankings, identical neighbor rankings, matching counts.
+- Tiny fixture dataset in `tests/fixtures/`.
+- Use Claude as a coding assistant for the pandas → PySpark translation; log
+  what it got wrong and what parity caught in `docs/notes/`.
+
+**Learn along the way**
+- Driver, workers, tasks; lazy evaluation.
+- Shuffles and why they're expensive; broadcast joins; window functions.
+- Spark UI: stages, tasks, shuffle sizes, spill.
+- Floating-point summation order and why parity needs a tolerance.
+
+**Done when**: parity passes on the fixture and the full Norman dataset; one deliberately introduced bug (e.g. averaging averages) is caught by parity.
+
+**Interview line**: "Migrated the analysis to PySpark and proved equivalence with an automated parity test."
+
+## Phase 4: E-distance three ways + benchmarks (1–1.5 days)
+
+**Build**
+- E-distance in Spark three ways: plain Python `udf`, grouped pandas
+  (`applyInPandas`), Scala function from `scala/edistance/` (sbt → jar,
+  loaded by PySpark).
+- All three parity-checked against the legacy answer key.
+- `benchmarks/edistance_3way.py`: same pairs, wall time per implementation.
+- `benchmarks/scale.py`: legacy vs Spark on 10/25/50/100% of the Replogle
+  dataset; wall time and peak memory; result charts in `benchmarks/results/`.
+
+**Learn along the way**
+- Why data crossing between the Java runtime and Python costs time; batch
+  (Arrow) vs row-by-row transfer.
+- Scala basics: syntax, types, sbt, jars.
+- How to benchmark honestly: warm-up runs, repeated runs, same input.
+
+**Done when**: both charts produced; all three implementations pass parity; results written up in `docs/notes/`, including where a single machine wins.
+
+**Interview line**: "Measured where distribution and Scala pay off instead of assuming it."
+
+## Phase 5: MongoDB + FastAPI + CI (1 day)
+
+**Build**
+- `pipeline/load_mongo.py`: one document per perturbation (see ARCHITECTURE.md);
+  index on name; index for gene lookups.
+- `api/`: FastAPI endpoints from ARCHITECTURE.md; async MongoDB driver;
+  Pydantic response models; tests against a test database.
+- `.github/workflows/ci.yml`: lint, unit tests, API tests, parity on fixture.
+
+**Learn along the way**
+- Document modeling: embed vs reference; indexes and `explain()`.
+- MongoDB aggregation pipeline vs LINQ.
+- FastAPI vs ASP.NET Core: routing, dependency injection, async; Pydantic vs DTOs.
+- GitHub Actions basics.
+
+**Done when**: `/docs` page lists all endpoints; queries use indexes per `explain()`; CI green on GitHub.
+
+**Interview line**: "Python backend with typed contracts, tested in CI, with parity as a merge gate."
+
+## Phase 6: Claude explain endpoint (0.5–1 day)
+
+**Build**
+- Fetch public gene descriptions (NCBI Gene via mygene.info) for signature
+  genes; store in MongoDB.
+- `POST /perturbations/{name}/explain`: signature + descriptions → Claude →
+  explanation.
+- Guardrail: reject explanations naming genes absent from the signature or
+  descriptions.
+- Decide access: Anthropic API key (simplest locally) or Amazon Bedrock
+  (needs AWS account; matches post-MVP).
+
+**Learn along the way**
+- Calling an LLM API; prompt design; token cost and latency.
+- Grounding (retrieval-augmented generation): fetch facts first, let the model
+  explain only those.
+
+**Done when**: explanations return for several perturbations; guardrail test rejects a planted made-up gene.
+
+**Interview line**: "AI explains computed results and is blocked from inventing them, matching protoXell's rule."
+
+---
+
+## After the MVP
+
+| Phase | Build |
+|---|---|
+| 7 | AWS: S3 zones, Spark job + Scala jar on EMR Serverless, MongoDB Atlas, API on ECS Fargate via ECR, secrets in Secrets Manager, billing alarm |
+| 8 | CD: GitHub Actions deploys to AWS on merge, OIDC credentials |
+| 9 | Insight service: explain moves behind SQS into its own ECS service; dead-letter queue |
+
+Stretch, unordered: tiny Node.js legacy API migrated to FastAPI with an API
+parity test; AI migration agent (Claude translates legacy code, parity
+judges); run records (dataset, code version, model, prompt) per result;
+pathway-level analysis.
+
+## If time runs short
+
+Cut in this order: phase 6 (explain becomes a whiteboard answer) → scale
+benchmark (keep three-way) → Scala implementation (keep plain Python vs
+grouped pandas). Phases 0–3 are the minimum credible demo.
+
+## Alongside every phase
+
+- 60–90 minutes of LeetCode in Python daily: hash maps, two pointers, sliding
+  window, binary search, BFS/DFS, heaps, intervals.
+- Short notes per phase in `docs/notes/`, in your own words.
