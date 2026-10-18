@@ -160,7 +160,7 @@ stored in order, so the API never sorts.
   "dataset": "NormanWeissman2019",
   "name": "KLF1",
   "target_genes": ["KLF1"],
-  "cell_count": 1240,
+  "cell_count": 1960,
   "sampled_cell_count": 100,
   "top_genes": [
     { "gene": "KLF1", "change": 3.10 },
@@ -169,25 +169,26 @@ stored in order, so the API never sorts.
   ],
   "similar": {
     "euclidean": [
-      { "name": "GATA1", "distance": 0.17 },
-      { "name": "TAL1",  "distance": 0.22 }
+      { "name": "CEBPE", "distance": 0.17 },
+      { "name": "KLF1_CEBPA", "distance": 0.22 }
     ],
     "edistance": [
-      { "name": "GATA1", "distance": 2.41 },
-      { "name": "TAL1",  "distance": 3.05 }
+      { "name": "CEBPE", "distance": 2.41 },
+      { "name": "KLF1_CEBPA", "distance": 3.05 }
     ]
   }
 }
 ```
 
-Values are illustrative.
+Names and KLF1's cell count are real (Norman dataset); genes, changes, and
+distances are illustrative.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `_id` | ObjectId | MongoDB's automatic record ID |
 | `dataset` | string | Source dataset; lets several datasets share the collection |
-| `name` | string | Perturbation label; combinations list genes alphabetically, so `CEBPA_KLF1` never also appears as `KLF1_CEBPA` |
-| `target_genes` | array of string | Gene or genes deliberately changed (1 or 2) |
+| `name` | string | Perturbation label as published in the dataset (`obs["perturbation"]`); two-gene combinations join genes with `_`, e.g. `KLF1_BAK1`. Norman has no pair under two labels |
+| `target_genes` | array of string | Gene or genes deliberately changed: `name.split("_")` (1 or 2) |
 | `cell_count` | int | Cells that received this perturbation |
 | `sampled_cell_count` | int | Cells used for E-distance (≤ 100) |
 | `top_genes` | array of {gene: string, change: double} | 50 biggest moves vs control, largest absolute change first; positive = more active |

@@ -10,8 +10,8 @@ Last updated: 2026-10-18.
 
 - **Done:** Phase 1, step 1.3 (inspect the h5ad file). Findings:
   [notes/norman-dataset.md](notes/norman-dataset.md).
-- **Uncommitted:** step 1.3 (`docs/notes/norman-dataset.md`, removed
-  `docs/notes/.gitkeep`) and this log update.
+- **Uncommitted:** docs/ARCHITECTURE.md schema update (approved) and this log
+  update.
 - **Next:** step 1.4 (write and run `pipeline/convert.py`). Brief the user
   first, then wait for an explicit go (see [AGENTS.md](../AGENTS.md)).
 
@@ -33,7 +33,7 @@ Chat called these steps "3.1–3.5"; same steps.
 |---|---|---|---|
 | 1.1 | Add anndata, scanpy, pyarrow | Done | `482e3fb` |
 | 1.2 | `pipeline/download.py`; download Norman h5ad (699 MB, MD5 verified) | Done | `482e3fb` |
-| 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | uncommitted |
+| 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | `62d333e` |
 | 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Next | |
 | 1.5 | Inspect Parquet output: row counts, sizes, sample rows | Pending | |
 
@@ -66,13 +66,11 @@ Chat called these steps "3.1–3.5"; same steps.
 - Zenodo throttles (0.1–7 MB/s observed). `download.py` resumes partial
   downloads; don't run downloads under short timeouts.
 - Learning scripts aren't saved to the repo unless the user asks.
+- Step 1.4 applies DataXight's quality filter: drop cells with
+  `percent_mito` ≥ 20% (54 of 111,445 cells). User approved.
+- Schema: `name` = published label (e.g. `KLF1_BAK1`), `target_genes` =
+  `name.split("_")`; no alphabetical renaming. Applied to ARCHITECTURE.md.
 
 ## Open items
 
-- Quality filter in step 1.4: apply DataXight's `percent_mito` < 20% filter?
-  Affects 54 of 111,445 cells.
-- Schema doc update pending user approval: drop the alphabetical-renaming
-  rule (labels have no duplicate pairs; `name` = published label,
-  `target_genes` = `name.split("_")`), and replace illustrative `GATA1` /
-  `TAL1` (not in dataset) with real names.
 - Claude access (Anthropic API vs Bedrock): decide in phase 6.
