@@ -1,7 +1,8 @@
 """Compute single-machine reference results (the answer key) from Parquet.
 
 data/processed/<name>/{cells,expression}.parquet -> per-gene averages -> signatures -> ranked genes
-  -> data/processed/<name>/legacy/{perturbations,signatures,top_genes}.parquet
+  -> pair distances -> nearest perturbations
+  -> data/processed/<name>/legacy/{perturbations,signatures,top_genes,euclidean,similar_euclidean}.parquet
 """
 
 import argparse
@@ -14,6 +15,7 @@ import pandas as pd
 from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 
 N_TOP = 50  # genes kept per perturbation
+N_SIMILAR = 20  # neighbors kept per perturbation per metric
 
 
 def load(name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -104,6 +106,48 @@ def check_targets(ranked: pd.DataFrame) -> None:
     print("    worst: " + ", ".join(f"{r.gene} (rank {r.rank}, {r.change:+.2f})" for r in worst.itertuples()))
 
 
+def euclidean(sig: pd.DataFrame) -> pd.DataFrame:
+    """Compute straight-line distance between every pair of signatures.
+
+    In: signatures.
+    Out: table (a, b, distance), one row per pair, a before b alphabetically.
+    """
+    grid = sig.pivot(index="perturbation", columns="gene", values="change")  # rows sorted by name
+    names, values = grid.index.to_numpy(), grid.to_numpy()
+    parts = [
+        pd.DataFrame({"a": names[i], "b": names[i + 1:], "distance": np.sqrt(((values[i + 1:] - values[i]) ** 2).sum(axis=1))})
+        for i in range(len(names) - 1)
+    ]
+    return pd.concat(parts, ignore_index=True)
+
+
+def nearest(pairs: pd.DataFrame) -> pd.DataFrame:
+    """Pick each perturbation's closest others; ties by neighbor name A-Z.
+
+    In: pair distances (a, b, distance).
+    Out: table (perturbation, rank, neighbor, distance), N_SIMILAR rows per perturbation.
+    """
+    both = pd.concat([
+        pairs.rename(columns={"a": "perturbation", "b": "neighbor"}),
+        pairs.rename(columns={"b": "perturbation", "a": "neighbor"}),
+    ], ignore_index=True).sort_values(["perturbation", "distance", "neighbor"], ignore_index=True)
+    both["rank"] = both.groupby("perturbation", sort=False).cumcount() + 1
+    return both.loc[both["rank"] <= N_SIMILAR, ["perturbation", "rank", "neighbor", "distance"]]
+
+
+def check_similar(similar: pd.DataFrame, example: str) -> None:
+    """Print list-size and self-match checks plus one example's closest neighbors.
+
+    In: nearest table, example perturbation name.
+    Out: none; prints report.
+    """
+    sizes = similar.groupby("perturbation").size()
+    selfs = (similar["perturbation"] == similar["neighbor"]).sum()
+    print(f"  similar check: {len(sizes)} lists, sizes {sizes.min()}-{sizes.max()}, self matches {selfs}")
+    top = similar[similar["perturbation"] == example].head(5)
+    print(f"    {example}: " + ", ".join(f"{r.neighbor} ({r.distance:.3f})" for r in top.itertuples()))
+
+
 def run(name: str) -> None:
     """Build answer key for one dataset.
 
@@ -123,18 +167,25 @@ def run(name: str) -> None:
     ranked = rank_genes(sig)
     log(start, f"signatures: {sig['perturbation'].nunique()} perturbations x {sig['gene'].nunique():,} genes")
 
+    pairs = euclidean(sig)
+    similar = nearest(pairs)
+    log(start, f"euclidean: {len(pairs):,} pairs")
+
     out = PROCESSED_DIR / name / "legacy"
     out.mkdir(parents=True, exist_ok=True)
     tables = {
         "perturbations": perturbation_table(counts, control),
         "signatures": sig,
         "top_genes": ranked.loc[ranked["rank"] <= N_TOP, ["perturbation", "rank", "gene", "change"]],
+        "euclidean": pairs,
+        "similar_euclidean": similar,
     }
     for table_name, table in tables.items():
         table.to_parquet(out / f"{table_name}.parquet", index=False)
         log(start, f"wrote legacy/{table_name}.parquet ({len(table):,} rows)")
 
     check_targets(ranked)
+    check_similar(similar, "KLF1")
     for f in sorted(out.glob("*.parquet")):
         print(f"  {f.name}: {f.stat().st_size / 1e6:.1f} MB")
     peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9  # macOS reports bytes

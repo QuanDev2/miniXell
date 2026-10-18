@@ -8,11 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, step 2.1. Last commit for Phase 1: `cbc9338`.
-- **Uncommitted:** step 2.1 (`pipeline/legacy_signatures.py`, ARCHITECTURE.md
-  KLF1 count and target-rank rule, this file).
-- **Next:** step 2.2 (Euclidean distance + 20 closest). Brief the user, wait
-  for an explicit go.
+- **Done:** Phase 0, Phase 1, steps 2.1–2.2. Last commit: `43fd331` (step 2.1).
+- **Uncommitted:** step 2.2 (`pipeline/legacy_signatures.py`, this file).
+- **Next:** step 2.3 (pinned-hash sampling rule). Brief the user, wait for an
+  explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -43,8 +42,8 @@ Output: `data/processed/norman/legacy/`.
 
 | Step | What | Status | Commit |
 |---|---|---|---|
-| 2.1 | Gene averages → signatures → top 50 genes → target check; writes `perturbations` (236 rows), `signatures` (487,576), `top_genes` (11,800) | Done | uncommitted |
-| 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean`, `similar_euclidean` | Next | |
+| 2.1 | Gene averages → signatures → top 50 genes → target check; writes `perturbations` (236 rows), `signatures` (487,576), `top_genes` (11,800) | Done | `43fd331` |
+| 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720) | Done | uncommitted |
 | 2.3 | Pinned-hash sampling rule (≤100 cells per perturbation), documented in CONCEPTS.md; writes `sampled_cells` | | |
 | 2.4 | E-distance on sampled cells' 50 PCs → 20 closest each; writes `edistance`, `similar_edistance` | | |
 | 2.5 | Clean full rerun; row counts, wall time, peak memory (scale-benchmark baseline) | | |
@@ -97,6 +96,10 @@ Output: `data/processed/norman/legacy/`.
   ties by gene name A→Z; `rank` stored as a column (row order isn't kept).
 - `legacy/` = outputs of the legacy script; Spark writes its own copy in
   phase 3 and parity compares them.
+- Step 2.2 parity contract: `euclidean` stores each pair once (`a` < `b`
+  alphabetically); similar lists rank by distance, ties by neighbor name A→Z,
+  `rank` stored. Distances computed with plain numpy (no scipy; it's only a
+  transitive dependency); matches scipy's exact function to 1e-14.
 
 ## Open items
 
