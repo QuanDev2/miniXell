@@ -8,12 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 1, step 1.3 (inspect the h5ad file). Findings:
-  [notes/norman-dataset.md](notes/norman-dataset.md).
-- **Uncommitted:** docs/ARCHITECTURE.md schema update (approved) and this log
-  update.
-- **Next:** step 1.4 (write and run `pipeline/convert.py`). Brief the user
-  first, then wait for an explicit go (see [AGENTS.md](../AGENTS.md)).
+- **Done:** Phase 1, step 1.4 (`pipeline/convert.py` written and run).
+- **Uncommitted:** `pipeline/convert.py` and this log update.
+- **Next:** step 1.5 (inspect the Parquet output). Brief the user first, then
+  wait for an explicit go (see [AGENTS.md](../AGENTS.md)).
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -34,8 +32,8 @@ Chat called these steps "3.1–3.5"; same steps.
 | 1.1 | Add anndata, scanpy, pyarrow | Done | `482e3fb` |
 | 1.2 | `pipeline/download.py`; download Norman h5ad (699 MB, MD5 verified) | Done | `482e3fb` |
 | 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | `62d333e` |
-| 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Next | |
-| 1.5 | Inspect Parquet output: row counts, sizes, sample rows | Pending | |
+| 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | uncommitted |
+| 1.5 | Inspect Parquet output: row counts, sizes, sample rows | Next | |
 
 ## Environment (this machine)
 
@@ -56,6 +54,11 @@ Chat called these steps "3.1–3.5"; same steps.
   `local[*]` = 10 workers.
 - Data: `data/raw/NormanWeissman2019_filtered.h5ad` (git-ignored). Re-fetch
   with `uv run python -m pipeline.download norman`.
+- Processed data: `data/processed/norman/` (git-ignored), rebuilt with
+  `uv run python -m pipeline.convert norman` (~80 s, peak 6.2 GB):
+  - `cells.parquet`: 111,391 rows (cell_id, perturbation, is_control, gemgroup), 1.3 MB;
+  - `expression.parquet`: 18,468,826 rows (cell_id, gene, value), 23 row groups, 89.4 MB;
+  - `cell_pcs.parquet`: 111,391 rows (cell_id, pc_1…pc_50), 34.7 MB.
 
 ## Decisions not in PLAN/ARCHITECTURE
 
@@ -70,6 +73,9 @@ Chat called these steps "3.1–3.5"; same steps.
   `percent_mito` ≥ 20% (54 of 111,445 cells). User approved.
 - Schema: `name` = published label (e.g. `KLF1_BAK1`), `target_genes` =
   `name.split("_")`; no alphabetical renaming. Applied to ARCHITECTURE.md.
+- Converter choices: `gemgroup` kept in `cells.parquet`; no per-gene
+  standardizing before PCA; PCA seed 0; one file per table; expression
+  `cell_id`/`gene` stored dictionary-encoded, `value` as float32.
 
 ## Open items
 
