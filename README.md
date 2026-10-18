@@ -64,8 +64,9 @@ Everything runs locally. AWS deployment follows the MVP.
 - [docs/CONCEPTS.md](docs/CONCEPTS.md): the science and math step by step: perturbations, signatures, Euclidean distance, E-distance.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): every component explained, MongoDB schema, design decisions, post-MVP architecture.
 - [docs/PLAN.md](docs/PLAN.md): build plan, phase by phase, with what each phase teaches.
+- [docs/PROGRESS.md](docs/PROGRESS.md): where the build stands, step by step, and what's next.
 - [docs/COMPANY_RESEARCH.md](docs/COMPANY_RESEARCH.md): DataXight, protoXell, their engineering and problems, with sources.
 
 ## Status
 
-Phase 0: not started.
+Phase 1 (Data → Parquet) in progress. Details: [docs/PROGRESS.md](docs/PROGRESS.md).

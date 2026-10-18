@@ -28,9 +28,18 @@ part of the job, not optional.
 - Run steps hands-off only if the user explicitly says so, and only for the
   steps they name.
 
+## Progress log
+
+- [docs/PROGRESS.md](docs/PROGRESS.md) is the handoff log. Read it first to
+  find the current phase, step, and what's next.
+- Update it after every step: status, commit hash (or "uncommitted"), the
+  next step, and any decision or environment change not already in
+  PLAN/ARCHITECTURE.
+
 ## References
 
 - Plan and phases: [docs/PLAN.md](docs/PLAN.md)
+- Progress and next step: [docs/PROGRESS.md](docs/PROGRESS.md)
 - Architecture and schema: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Science and math explained: [docs/CONCEPTS.md](docs/CONCEPTS.md)
 - Company research: [docs/COMPANY_RESEARCH.md](docs/COMPANY_RESEARCH.md)
