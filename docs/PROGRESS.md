@@ -8,13 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 1, step 1.5 (inspect the Parquet output). Findings:
-  [notes/norman-dataset.md](notes/norman-dataset.md#processed-output-step-15).
-- **Target-gene fix applied** (user chose option A): `convert.py` now keeps
-  the 2,000 most variable genes plus all targeted genes; 102 of 105 targets
-  kept. 3 targets use old gene names (see Accepted limitations).
-- **Uncommitted:** `pipeline/convert.py`, notes, AGENTS.md, and this log update.
-- **Next:** Phase 2 (legacy reference). Brief the user first.
+- **Done:** Phase 0 and Phase 1. Last commit for Phase 1: `cbc9338`.
+- **Uncommitted:** nothing.
+- **Next:** Phase 2 (legacy reference). Define its steps (see "Notes for
+  Phase 2" below), brief the user, wait for an explicit go per step.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -36,7 +33,7 @@ Chat called these steps "3.1–3.5"; same steps.
 | 1.2 | `pipeline/download.py`; download Norman h5ad (699 MB, MD5 verified) | Done | `482e3fb` |
 | 1.3 | Inspect the file: cells, genes, `obs` columns, perturbation label column, control label, combination label format, whether `X` holds raw counts | Done | `62d333e` |
 | 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | `95e0ce1` |
-| 1.5 | Inspect Parquet output; target-gene check failed → fixed (2,000 variable + targeted genes; 102/105 targets) | Done | uncommitted |
+| 1.5 | Inspect Parquet output; target-gene check failed → fixed (2,000 variable + targeted genes; 102/105 targets) | Done | `cbc9338` |
 
 ## Environment (this machine)
 
@@ -93,3 +90,44 @@ Chat called these steps "3.1–3.5"; same steps.
   inferred). Their perturbations still get signatures and distances; they're
   only excluded from the "target moves in its own signature" sanity check.
   User accepted 102/105 (MVP over perfection).
+
+## Notes for Phase 2 (legacy reference)
+
+Goal (PLAN.md phase 2): `pipeline/legacy_signatures.py`, single-machine
+pandas, all in memory, producing the answer key Spark must match in phase 3.
+Details that matter for correctness:
+
+- Inputs: `data/processed/norman/{cells,expression,cell_pcs}.parquet`.
+- Averages: `expression` stores only non-zero values. A gene's average in a
+  perturbation = sum of its values ÷ **that perturbation's total cell count**
+  (from `cells`), not ÷ rows present. Same for the control average.
+- Signature = perturbation average − control average, per gene (2,066 genes).
+  Top genes = 50 largest by absolute change.
+- Euclidean distance between two perturbations = straight-line distance
+  between their full 2,066-gene average vectors (control cancels; see
+  CONCEPTS.md §5).
+- E-distance (CONCEPTS.md §6, pertpy's current formula):
+  `2 × mean(between) − mean(within A) − mean(within B)`, cell-to-cell
+  distances = plain Euclidean on the 50 PCs, within-group means include each
+  cell paired with itself (divide by n²).
+- Sampling for E-distance: up to 100 cells per perturbation, chosen by a
+  pinned hash of `cell_id` (sort by hash, take first 100). Don't use Python's
+  built-in `hash()` (randomized per process); pick an explicit algorithm Spark
+  can reproduce. 12 perturbations have fewer than 100 cells; they use all.
+- Similar lists: per perturbation, 20 closest others per metric; never itself;
+  controls excluded (236 perturbations).
+- Sanity check: each single-gene perturbation's own target ranks high in its
+  signature (102 targets available; see Accepted limitations).
+- Output (answer key) goes under `data/processed/norman/` (git-ignored),
+  e.g. a `legacy/` folder in Parquet.
+
+## Working with this user
+
+- Read [AGENTS.md](../AGENTS.md) first: teaching loop, one step then stop,
+  MVP first, update this log after every step.
+- The user's global rules also apply: numbered `##` sections, bold-led claims
+  with short sub-bullets, plain terms by default, end by asking for direction,
+  no changes without explicit approval.
+- The user is a .NET/Angular developer learning this stack for a DataXight
+  interview; .NET analogies land well. Expect conceptual questions before each
+  step; answer briefly and at the level asked.
