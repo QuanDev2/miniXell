@@ -8,10 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, steps 2.1–2.4. Last commit: `e8d9581` (step 2.3).
-- **Uncommitted:** step 2.4 (`pipeline/legacy_signatures.py`, this file).
-- **Next:** step 2.5 (clean rerun; counts, wall time, peak memory). Brief the
-  user, wait for an explicit go.
+- **Done:** Phase 0, Phase 1, Phase 2. Last commit: `1e7937c` (step 2.4).
+- **Uncommitted:** this file (step 2.5 results, Phase 2 closed).
+- **Next:** Phase 3 (PySpark job + parity). Define its steps, brief the
+  user, wait for an explicit go per step.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -35,10 +35,9 @@ Chat called these steps "3.1–3.5"; same steps.
 | 1.4 | Write and run `pipeline/convert.py` → `cells.parquet`, `expression.parquet`, `cell_pcs.parquet` in `data/processed/norman/` | Done | `95e0ce1` |
 | 1.5 | Inspect Parquet output; target-gene check failed → fixed (2,000 variable + targeted genes; 102/105 targets) | Done | `cbc9338` |
 
-## Phase 2: Legacy reference (in progress)
+## Phase 2: Legacy reference (done)
 
-Run: `uv run python -m pipeline.legacy_signatures norman` (~15 s, of which
-E-distance ~11 s; peak 2.5 GB).
+Run: `uv run python -m pipeline.legacy_signatures norman`.
 Output: `data/processed/norman/legacy/`.
 
 | Step | What | Status | Commit |
@@ -46,8 +45,38 @@ Output: `data/processed/norman/legacy/`.
 | 2.1 | Gene averages → signatures → top 50 genes → target check; writes `perturbations` (236 rows), `signatures` (487,576), `top_genes` (11,800) | Done | `43fd331` |
 | 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720) | Done | `49b440a` |
 | 2.3 | MD5 sampling rule (≤100 cells per perturbation), recipe in CONCEPTS.md §7; writes `sampled_cells` (23,290 rows), adds `sampled_cell_count` to `perturbations` | Done | `e8d9581` |
-| 2.4 | E-distance on sampled cells' 50 PCs → 20 closest each; writes `edistance` (27,730 rows), `similar_edistance` (4,720); 0 negative, min 0.11; matches pure-Python hand check and scipy to 1e-14 | Done | uncommitted |
-| 2.5 | Clean full rerun; row counts, wall time, peak memory (scale-benchmark baseline) | | |
+| 2.4 | E-distance on sampled cells' 50 PCs → 20 closest each; writes `edistance` (27,730 rows), `similar_edistance` (4,720); 0 negative, min 0.11; matches pure-Python hand check and scipy to 1e-14 | Done | `1e7937c` |
+| 2.5 | Deleted `legacy/`, rebuilt from Phase 1 files, ran again: all 8 tables identical across runs | Done | uncommitted (docs only) |
+
+Answer key (`data/processed/norman/legacy/`):
+
+| Table | Rows |
+|---|---|
+| `perturbations` | 236 |
+| `signatures` | 487,576 |
+| `top_genes` | 11,800 |
+| `euclidean` | 27,730 |
+| `similar_euclidean` | 4,720 |
+| `sampled_cells` | 23,290 |
+| `edistance` | 27,730 |
+| `similar_edistance` | 4,720 |
+
+Single-machine baseline (step 2.5, clean run, Apple M4):
+
+| Stage | Seconds |
+|---|---|
+| Load Parquet | 0.3 |
+| Gene averages | 0.8 |
+| Signatures + ranking | 0.2 |
+| Euclidean (all pairs) | 0.1 |
+| Sampling | 0.1 |
+| E-distance (all pairs) | 11.7 |
+| Write tables | 0.1 |
+| Script total | 13.3 |
+| Process wall time (incl. ~2 s imports) | 15.5 |
+
+Peak memory 2.4 GB. Imports include scanpy because the script reuses
+`log`/`PROCESSED_DIR` from `convert.py`; time inside `run()` for benchmarks.
 
 ## Environment (this machine)
 
