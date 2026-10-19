@@ -8,10 +8,11 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, Phase 2. Last commit: `1e7937c` (step 2.4).
-- **Uncommitted:** this file (step 2.5 results, Phase 2 closed).
-- **Next:** Phase 3 (PySpark job + parity). Define its steps, brief the
-  user, wait for an explicit go per step.
+- **Done:** Phase 0, Phase 1, Phase 2, step 3.1. Last commit: `74ae460`
+  (Phase 2 close-out).
+- **Uncommitted:** step 3.1 (`pipeline/spark_signatures.py`, this file).
+- **Next:** step 3.2 (Spark signatures). Brief the user (commented code
+  snippets; see "Working with this user"), wait for an explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -77,6 +78,26 @@ Single-machine baseline (step 2.5, clean run, Apple M4):
 
 Peak memory 2.4 GB. Imports include scanpy because the script reuses
 `log`/`PROCESSED_DIR` from `convert.py`; time inside `run()` for benchmarks.
+
+## Phase 3: PySpark job + parity (in progress)
+
+Run: `uv run --env-file .env python -m pipeline.spark_signatures norman`
+(`--hold` keeps the Spark UI at `localhost:4040` open until Enter).
+Output: `data/processed/norman/spark/<table>/` (folder of part files).
+Each build step runs a throwaway comparison against `legacy/`.
+
+| Step | What | Status | Commit |
+|---|---|---|---|
+| 3.1 | Spark session, read Parquet, cells per perturbation; writes `perturbations` (236 rows; names, counts, target genes match legacy) | Done | uncommitted |
+| 3.2 | Gene averages as (sum, count) → broadcast control averages → signatures; writes `signatures` | Next | |
+| 3.3 | Top 50 genes per perturbation (window function); writes `top_genes` | | |
+| 3.4 | Euclidean distance all pairs → 20 closest; writes `euclidean`, `similar_euclidean` | | |
+| 3.5 | `tests/test_parity.py` on full Norman: tolerance, top-10 genes, neighbor rankings, counts | | |
+| 3.6 | Tiny fixture in `tests/fixtures/`; scripts take input/output folders; parity on fixture | | |
+| 3.7 | Deliberate bug (÷ rows present) caught by parity, reverted; write-up in `docs/notes/` | | |
+
+`sampled_cell_count` and E-distance in Spark come in Phase 4. AI-assistant
+translation mistakes get logged in `docs/notes/` as they happen (PLAN.md).
 
 ## Environment (this machine)
 
@@ -190,3 +211,6 @@ Details that matter for correctness:
 - The user is a .NET/Angular developer learning this stack for a DataXight
   interview; .NET analogies land well. Expect conceptual questions before each
   step; answer briefly and at the level asked.
+- Pre-implementation briefs: show the code to be written as snippets with
+  comments explaining each block or non-obvious line, plus a .NET analogy
+  where it helps. The user asked for this format explicitly.
