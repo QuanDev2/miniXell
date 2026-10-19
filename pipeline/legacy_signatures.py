@@ -1,11 +1,13 @@
 """Compute single-machine reference results (the answer key) from Parquet.
 
 data/processed/<name>/{cells,expression}.parquet -> per-gene averages -> signatures -> ranked genes
-  -> pair distances -> nearest perturbations
-  -> data/processed/<name>/legacy/{perturbations,signatures,top_genes,euclidean,similar_euclidean}.parquet
+  -> pair distances -> nearest perturbations; cells -> MD5 sample per perturbation
+  -> data/processed/<name>/legacy/{perturbations,signatures,top_genes,euclidean,similar_euclidean,
+     sampled_cells}.parquet
 """
 
 import argparse
+import hashlib
 import resource
 import time
 
@@ -16,6 +18,7 @@ from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 
 N_TOP = 50  # genes kept per perturbation
 N_SIMILAR = 20  # neighbors kept per perturbation per metric
+N_SAMPLE = 100  # cells per perturbation for E-distance
 
 
 def load(name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -76,16 +79,29 @@ def rank_genes(sig: pd.DataFrame) -> pd.DataFrame:
     return ranked.drop(columns="size")
 
 
-def perturbation_table(counts: pd.Series, control: str) -> pd.DataFrame:
-    """List perturbations with target genes and cell counts; control excluded.
+def perturbation_table(counts: pd.Series, sampled: pd.DataFrame, control: str) -> pd.DataFrame:
+    """List perturbations with target genes, cell counts, sampled cell counts; control excluded.
 
-    In: cell count per label, control label.
-    Out: table (name, target_genes, cell_count).
+    In: cell count per label, sampled cells, control label.
+    Out: table (name, target_genes, cell_count, sampled_cell_count).
     """
     table = counts.drop(control).rename("cell_count").rename_axis("name").reset_index()
     table["name"] = table["name"].astype(str)
     table["target_genes"] = table["name"].str.split("_")
-    return table[["name", "target_genes", "cell_count"]]
+    table["sampled_cell_count"] = table["name"].map(sampled.groupby("perturbation").size())
+    return table[["name", "target_genes", "cell_count", "sampled_cell_count"]]
+
+
+def sample_cells(cells: pd.DataFrame, control: str) -> pd.DataFrame:
+    """Pick up to N_SAMPLE cells per perturbation: lowest MD5 hex of UTF-8 cell_id first.
+
+    In: cells, control label.
+    Out: table (perturbation, cell_id, fingerprint), ordered by perturbation then fingerprint.
+    """
+    pert = cells.loc[cells["perturbation"] != control, ["perturbation", "cell_id"]].astype(str)
+    pert["fingerprint"] = [hashlib.md5(c.encode("utf-8")).hexdigest() for c in pert["cell_id"]]
+    pert = pert.sort_values(["perturbation", "fingerprint", "cell_id"], ignore_index=True)
+    return pert.groupby("perturbation", sort=False).head(N_SAMPLE).reset_index(drop=True)
 
 
 def check_targets(ranked: pd.DataFrame) -> None:
@@ -171,14 +187,18 @@ def run(name: str) -> None:
     similar = nearest(pairs)
     log(start, f"euclidean: {len(pairs):,} pairs")
 
+    sampled = sample_cells(cells, control)
+    log(start, f"sampled {len(sampled):,} cells (up to {N_SAMPLE} per perturbation)")
+
     out = PROCESSED_DIR / name / "legacy"
     out.mkdir(parents=True, exist_ok=True)
     tables = {
-        "perturbations": perturbation_table(counts, control),
+        "perturbations": perturbation_table(counts, sampled, control),
         "signatures": sig,
         "top_genes": ranked.loc[ranked["rank"] <= N_TOP, ["perturbation", "rank", "gene", "change"]],
         "euclidean": pairs,
         "similar_euclidean": similar,
+        "sampled_cells": sampled,
     }
     for table_name, table in tables.items():
         table.to_parquet(out / f"{table_name}.parquet", index=False)
@@ -186,6 +206,8 @@ def run(name: str) -> None:
 
     check_targets(ranked)
     check_similar(similar, "KLF1")
+    sizes = sampled.groupby("perturbation").size()
+    print(f"  sample check: {len(sizes)} perturbations, {(sizes < N_SAMPLE).sum()} below {N_SAMPLE} (smallest {sizes.min()})")
     for f in sorted(out.glob("*.parquet")):
         print(f"  {f.name}: {f.stat().st_size / 1e6:.1f} MB")
     peak_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e9  # macOS reports bytes

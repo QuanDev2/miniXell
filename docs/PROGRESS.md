@@ -8,9 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, steps 2.1–2.2. Last commit: `43fd331` (step 2.1).
-- **Uncommitted:** step 2.2 (`pipeline/legacy_signatures.py`, this file).
-- **Next:** step 2.3 (pinned-hash sampling rule). Brief the user, wait for an
+- **Done:** Phase 0, Phase 1, steps 2.1–2.3. Last commit: `49b440a` (step 2.2).
+- **Uncommitted:** step 2.3 (`pipeline/legacy_signatures.py`, CONCEPTS.md
+  recipe, this file).
+- **Next:** step 2.4 (E-distance + 20 closest). Brief the user, wait for an
   explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
@@ -43,8 +44,8 @@ Output: `data/processed/norman/legacy/`.
 | Step | What | Status | Commit |
 |---|---|---|---|
 | 2.1 | Gene averages → signatures → top 50 genes → target check; writes `perturbations` (236 rows), `signatures` (487,576), `top_genes` (11,800) | Done | `43fd331` |
-| 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720) | Done | uncommitted |
-| 2.3 | Pinned-hash sampling rule (≤100 cells per perturbation), documented in CONCEPTS.md; writes `sampled_cells` | | |
+| 2.2 | Euclidean distance between all perturbation pairs → 20 closest each; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720) | Done | `49b440a` |
+| 2.3 | MD5 sampling rule (≤100 cells per perturbation), recipe in CONCEPTS.md §7; writes `sampled_cells` (23,290 rows), adds `sampled_cell_count` to `perturbations` | Done | uncommitted |
 | 2.4 | E-distance on sampled cells' 50 PCs → 20 closest each; writes `edistance`, `similar_edistance` | | |
 | 2.5 | Clean full rerun; row counts, wall time, peak memory (scale-benchmark baseline) | | |
 
@@ -104,6 +105,9 @@ Output: `data/processed/norman/legacy/`.
 ## Open items
 
 - Claude access (Anthropic API vs Bedrock): decide in phase 6.
+- PySpark 4.2.0 warns it doesn't fully support pandas ≥ 3.0 (installed via
+  anndata). Spark → pandas conversion worked in step 2.3's check; watch for
+  issues in phase 3 (`toPandas`, `applyInPandas`).
 
 ## Accepted limitations
 

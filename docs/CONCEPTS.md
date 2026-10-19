@@ -206,6 +206,18 @@ Trap: Python's built-in `hash()` changes every time a program starts, and
 Spark's built-in hash uses a different recipe. Both sides must use one
 explicit, pinned recipe. Bonus: reruns give identical answers.
 
+**The pinned recipe** (legacy and Spark must both follow it exactly):
+
+1. Skip control cells; group the rest by perturbation.
+2. Fingerprint = MD5 of the `cell_id` text (UTF-8), written as 32 lowercase
+   hex characters. Python: `hashlib.md5(cell_id.encode()).hexdigest()`; Spark:
+   `F.md5("cell_id")`.
+3. Within each perturbation, sort by fingerprint, then `cell_id` (tie-break),
+   and keep the first 100. Fewer than 100 cells → keep all.
+
+Norman: 23,290 sampled cells; 12 perturbations keep all (smallest 54). Spark
+run on the same rule picked the identical set.
+
 ## 8. Similar lists
 
 For each perturbation, Spark ranks every other perturbation by distance and
