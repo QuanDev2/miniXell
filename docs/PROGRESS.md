@@ -8,11 +8,13 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, Phase 2, step 3.1. Last commit: `74ae460`
-  (Phase 2 close-out).
-- **Uncommitted:** step 3.1 (`pipeline/spark_signatures.py`, this file).
-- **Next:** step 3.2 (Spark signatures). Brief the user (commented code
-  snippets; see "Working with this user"), wait for an explicit go.
+- **Done:** Phase 0, Phase 1, Phase 2, steps 3.1–3.2. Last commit: `9f93a2a`
+  (step 3.1).
+- **Uncommitted:** step 3.2 (`pipeline/spark_signatures.py`,
+  `docs/notes/spark-translation.md`, this file).
+- **Next:** step 3.3 (top 50 genes, window function). Brief the user
+  (commented code snippets; see "Working with this user"), wait for an
+  explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -88,9 +90,9 @@ Each build step runs a throwaway comparison against `legacy/`.
 
 | Step | What | Status | Commit |
 |---|---|---|---|
-| 3.1 | Spark session, read Parquet, cells per perturbation; writes `perturbations` (236 rows; names, counts, target genes match legacy) | Done | uncommitted |
-| 3.2 | Gene averages as (sum, count) → broadcast control averages → signatures; writes `signatures` | Next | |
-| 3.3 | Top 50 genes per perturbation (window function); writes `top_genes` | | |
+| 3.1 | Spark session, read Parquet, cells per perturbation; writes `perturbations` (236 rows; names, counts, target genes match legacy) | Done | `9f93a2a` |
+| 3.2 | Broadcast join cells → sum per (perturbation, gene) → full grid (cross join + left join, fill 0) ÷ cell count → cached → minus broadcast control; writes `signatures` (487,576 rows, 11 part files). Matches legacy bit-for-bit (max gap 0.0), no missing/duplicate rows. ~8 s for this table vs ~1 s in pandas (Spark overhead at this size) | Done | uncommitted |
+| 3.3 | Top 50 genes per perturbation (window function); writes `top_genes` | Next | |
 | 3.4 | Euclidean distance all pairs → 20 closest; writes `euclidean`, `similar_euclidean` | | |
 | 3.5 | `tests/test_parity.py` on full Norman: tolerance, top-10 genes, neighbor rankings, counts | | |
 | 3.6 | Tiny fixture in `tests/fixtures/`; scripts take input/output folders; parity on fixture | | |
