@@ -1,9 +1,10 @@
 """Compute single-machine reference results (the answer key) from Parquet.
 
-data/processed/<name>/{cells,expression}.parquet -> per-gene averages -> signatures -> ranked genes
-  -> pair distances -> nearest perturbations; cells -> MD5 sample per perturbation
+data/processed/<name>/{cells,expression,cell_pcs}.parquet -> per-gene averages -> signatures -> ranked genes
+  -> Euclidean pair distances -> nearest perturbations
+  cells -> MD5 sample per perturbation -> E-distance on sampled PCs -> nearest perturbations
   -> data/processed/<name>/legacy/{perturbations,signatures,top_genes,euclidean,similar_euclidean,
-     sampled_cells}.parquet
+     sampled_cells,edistance,similar_edistance}.parquet
 """
 
 import argparse
@@ -21,16 +22,18 @@ N_SIMILAR = 20  # neighbors kept per perturbation per metric
 N_SAMPLE = 100  # cells per perturbation for E-distance
 
 
-def load(name: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Read cells and expression tables.
+def load(name: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Read cells, expression, cell PC tables.
 
     In: dataset name.
-    Out: cells (cell_id, perturbation), expression (cell_id, gene, value; non-zero only).
+    Out: cells (cell_id, perturbation), expression (cell_id, gene, value; non-zero only),
+      pcs (cell_id, pc_1..pc_50).
     """
     src = PROCESSED_DIR / name
     cells = pd.read_parquet(src / "cells.parquet", columns=["cell_id", "perturbation"])
     expression = pd.read_parquet(src / "expression.parquet")
-    return cells, expression
+    pcs = pd.read_parquet(src / "cell_pcs.parquet")
+    return cells, expression, pcs
 
 
 def gene_means(cells: pd.DataFrame, expression: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series]:
@@ -151,15 +154,42 @@ def nearest(pairs: pd.DataFrame) -> pd.DataFrame:
     return both.loc[both["rank"] <= N_SIMILAR, ["perturbation", "rank", "neighbor", "distance"]]
 
 
-def check_similar(similar: pd.DataFrame, example: str) -> None:
+def mean_distance(x: np.ndarray, y: np.ndarray) -> float:
+    """Average straight-line distance over every (x cell, y cell) pair.
+
+    In: two cell-by-PC arrays.
+    Out: mean distance; self pairs included when x is y.
+    """
+    return float(np.sqrt(((x[:, None, :] - y[None, :, :]) ** 2).sum(axis=2)).mean())
+
+
+def edistance(sampled: pd.DataFrame, pcs: pd.DataFrame) -> pd.DataFrame:
+    """Compute E-distance between every pair of perturbations on sampled cells' PCs.
+
+    In: sampled cells, cell PCs.
+    Out: table (a, b, distance), one row per pair, a before b alphabetically.
+    """
+    coords = pcs.set_index("cell_id").loc[sampled["cell_id"]].to_numpy(np.float64)
+    groups = {name: coords[idx] for name, idx in sampled.groupby("perturbation").indices.items()}
+    names = sorted(groups)
+    within = {name: mean_distance(groups[name], groups[name]) for name in names}
+    rows = [
+        (a, b, 2 * mean_distance(groups[a], groups[b]) - within[a] - within[b])
+        for i, a in enumerate(names)
+        for b in names[i + 1:]
+    ]
+    return pd.DataFrame(rows, columns=["a", "b", "distance"])
+
+
+def check_similar(similar: pd.DataFrame, metric: str, example: str) -> None:
     """Print list-size and self-match checks plus one example's closest neighbors.
 
-    In: nearest table, example perturbation name.
+    In: nearest table, metric label, example perturbation name.
     Out: none; prints report.
     """
     sizes = similar.groupby("perturbation").size()
     selfs = (similar["perturbation"] == similar["neighbor"]).sum()
-    print(f"  similar check: {len(sizes)} lists, sizes {sizes.min()}-{sizes.max()}, self matches {selfs}")
+    print(f"  similar check ({metric}): {len(sizes)} lists, sizes {sizes.min()}-{sizes.max()}, self matches {selfs}")
     top = similar[similar["perturbation"] == example].head(5)
     print(f"    {example}: " + ", ".join(f"{r.neighbor} ({r.distance:.3f})" for r in top.itertuples()))
 
@@ -173,8 +203,8 @@ def run(name: str) -> None:
     """
     start = time.perf_counter()
     control = COLUMNS[name]["control"]
-    cells, expression = load(name)
-    log(start, f"loaded {len(cells):,} cells, {len(expression):,} expression rows")
+    cells, expression, pcs = load(name)
+    log(start, f"loaded {len(cells):,} cells, {len(expression):,} expression rows, {len(pcs):,} PC rows")
 
     means, counts = gene_means(cells, expression)
     log(start, f"averaged {means.shape[1]:,} genes over {means.shape[0]} groups ({control} included)")
@@ -190,6 +220,10 @@ def run(name: str) -> None:
     sampled = sample_cells(cells, control)
     log(start, f"sampled {len(sampled):,} cells (up to {N_SAMPLE} per perturbation)")
 
+    epairs = edistance(sampled, pcs)
+    esimilar = nearest(epairs)
+    log(start, f"edistance: {len(epairs):,} pairs")
+
     out = PROCESSED_DIR / name / "legacy"
     out.mkdir(parents=True, exist_ok=True)
     tables = {
@@ -199,13 +233,17 @@ def run(name: str) -> None:
         "euclidean": pairs,
         "similar_euclidean": similar,
         "sampled_cells": sampled,
+        "edistance": epairs,
+        "similar_edistance": esimilar,
     }
     for table_name, table in tables.items():
         table.to_parquet(out / f"{table_name}.parquet", index=False)
         log(start, f"wrote legacy/{table_name}.parquet ({len(table):,} rows)")
 
     check_targets(ranked)
-    check_similar(similar, "KLF1")
+    check_similar(similar, "euclidean", "KLF1")
+    check_similar(esimilar, "edistance", "KLF1")
+    print(f"  edistance check: {(epairs['distance'] < 0).sum()} negative, min {epairs['distance'].min():.4f}")
     sizes = sampled.groupby("perturbation").size()
     print(f"  sample check: {len(sizes)} perturbations, {(sizes < N_SAMPLE).sum()} below {N_SAMPLE} (smallest {sizes.min()})")
     for f in sorted(out.glob("*.parquet")):
