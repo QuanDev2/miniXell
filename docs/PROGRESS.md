@@ -8,11 +8,10 @@ Last updated: 2026-10-18.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, Phase 2, steps 3.1–3.3. Last commit: `3cdbea7`
-  (step 3.2).
-- **Uncommitted:** step 3.3 (`pipeline/spark_signatures.py`,
-  `docs/notes/spark-translation.md`, this file).
-- **Next:** step 3.4 (Euclidean distance + 20 closest). Brief the user
+- **Done:** Phase 0, Phase 1, Phase 2, steps 3.1–3.4. Last commit: `3d80ef3`
+  (step 3.3).
+- **Uncommitted:** step 3.4 (`pipeline/spark_signatures.py`, this file).
+- **Next:** step 3.5 (`tests/test_parity.py` on full Norman). Brief the user
   (commented code snippets; see "Working with this user"), wait for an
   explicit go.
 
@@ -92,9 +91,9 @@ Each build step runs a throwaway comparison against `legacy/`.
 |---|---|---|---|
 | 3.1 | Spark session, read Parquet, cells per perturbation; writes `perturbations` (236 rows; names, counts, target genes match legacy) | Done | `9f93a2a` |
 | 3.2 | Broadcast join cells → sum per (perturbation, gene) → full grid (cross join + left join, fill 0) ÷ cell count → cached → minus broadcast control; writes `signatures` (487,576 rows, 11 part files). Matches legacy bit-for-bit (max gap 0.0), no missing/duplicate rows. ~8 s for this table vs ~1 s in pandas (Spark overhead at this size) | Done | `3cdbea7` |
-| 3.3 | Window `row_number` per perturbation by abs(change) desc, gene asc; keep ≤50; writes `top_genes` (11,800 rows). Identical genes at every rank vs legacy, max gap 0.0. Plan: reads cached grid; `WindowGroupLimit` trims to top 50 per worker before the shuffle | Done | uncommitted |
-| 3.4 | Euclidean distance all pairs → 20 closest; writes `euclidean`, `similar_euclidean` | Next | |
-| 3.5 | `tests/test_parity.py` on full Norman: tolerance, top-10 genes, neighbor rankings, counts | | |
+| 3.3 | Window `row_number` per perturbation by abs(change) desc, gene asc; keep ≤50; writes `top_genes` (11,800 rows). Identical genes at every rank vs legacy, max gap 0.0. Plan: reads cached grid; `WindowGroupLimit` trims to top 50 per worker before the shuffle | Done | `3d80ef3` |
+| 3.4 | Self-join signatures on gene (a < b) → sum squared gaps → sqrt; cached; union both directions → window rank ≤20; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720). Max gap vs legacy 2.7e-15; neighbor rankings identical. SortMergeJoin output 57,290,180 rows, run once (cache). Full job ~29 s (euclidean ~10 s vs 0.1 s numpy) | Done | uncommitted |
+| 3.5 | `tests/test_parity.py` on full Norman: tolerance, top-10 genes, neighbor rankings, counts | Next | |
 | 3.6 | Tiny fixture in `tests/fixtures/`; scripts take input/output folders; parity on fixture | | |
 | 3.7 | Deliberate bug (÷ rows present) caught by parity, reverted; write-up in `docs/notes/` | | |
 

@@ -2,7 +2,8 @@
 
 data/processed/<name>/{cells,expression}.parquet -> cells per perturbation
   -> gene sums per perturbation -> full grid of averages -> minus control averages -> top genes per perturbation
-  -> data/processed/<name>/spark/{perturbations,signatures,top_genes}/
+  -> Euclidean pair distances -> nearest perturbations
+  -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean}/
 """
 
 import argparse
@@ -15,6 +16,7 @@ from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 
 DRIVER_MEMORY = "8g"
 N_TOP = 50  # genes kept per perturbation
+N_SIMILAR = 20  # neighbors kept per perturbation
 
 
 def session() -> SparkSession:
@@ -102,6 +104,39 @@ def top_genes(sig: DataFrame) -> DataFrame:
     )
 
 
+def euclidean(sig: DataFrame) -> DataFrame:
+    """Compute straight-line distance between every pair of signatures.
+
+    In: signatures.
+    Out: plan for table (a, b, distance), one row per pair, a before b alphabetically.
+    """
+    a = sig.select(F.col("perturbation").alias("a"), "gene", F.col("change").alias("change_a"))
+    b = sig.select(F.col("perturbation").alias("b"), "gene", F.col("change").alias("change_b"))
+    return (
+        a.join(b, on="gene")
+        .where(F.col("a") < F.col("b"))
+        .groupBy("a", "b")
+        .agg(F.sqrt(F.sum((F.col("change_a") - F.col("change_b")) ** 2)).alias("distance"))
+    )
+
+
+def nearest(pairs: DataFrame) -> DataFrame:
+    """Pick each perturbation's N_SIMILAR closest others; ties by neighbor name A-Z.
+
+    In: pair distances (a, b, distance).
+    Out: plan for table (perturbation, rank, neighbor, distance).
+    """
+    both = pairs.select(F.col("a").alias("perturbation"), F.col("b").alias("neighbor"), "distance").unionByName(
+        pairs.select(F.col("b").alias("perturbation"), F.col("a").alias("neighbor"), "distance")
+    )
+    closest = Window.partitionBy("perturbation").orderBy("distance", "neighbor")
+    return (
+        both.withColumn("rank", F.row_number().over(closest))
+        .where(F.col("rank") <= N_SIMILAR)
+        .select("perturbation", "rank", "neighbor", "distance")
+    )
+
+
 def run(name: str, hold: bool) -> None:
     """Build Spark results for one dataset.
 
@@ -119,10 +154,13 @@ def run(name: str, hold: bool) -> None:
     expression = spark.read.parquet(str(src / "expression.parquet"))
 
     sig = signatures(cells, expression, control)
+    pairs = euclidean(sig).cache()  # used 3 times: written, both sides of nearest's union
     tables = {
         "perturbations": perturbation_table(cells),
         "signatures": sig,
         "top_genes": top_genes(sig),
+        "euclidean": pairs,
+        "similar_euclidean": nearest(pairs),
     }
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")
