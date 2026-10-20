@@ -8,3 +8,8 @@ dependencies = [
     "pyspark>=4.2.0",
     "scanpy>=1.12.4",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
