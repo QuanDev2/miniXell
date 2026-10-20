@@ -1,19 +1,20 @@
 """Compute signatures and distances with PySpark in local mode from Parquet.
 
 data/processed/<name>/{cells,expression}.parquet -> cells per perturbation
-  -> gene sums per perturbation -> full grid of averages -> minus control averages
-  -> data/processed/<name>/spark/{perturbations,signatures}/
+  -> gene sums per perturbation -> full grid of averages -> minus control averages -> top genes per perturbation
+  -> data/processed/<name>/spark/{perturbations,signatures,top_genes}/
 """
 
 import argparse
 import time
 
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
 from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 
 DRIVER_MEMORY = "8g"
+N_TOP = 50  # genes kept per perturbation
 
 
 def session() -> SparkSession:
@@ -87,6 +88,20 @@ def signatures(cells: DataFrame, expression: DataFrame, control: str) -> DataFra
     )
 
 
+def top_genes(sig: DataFrame) -> DataFrame:
+    """Keep each perturbation's N_TOP genes by absolute change; ties by gene name A-Z.
+
+    In: signatures.
+    Out: plan for table (perturbation, rank, gene, change); rank 1 = largest move.
+    """
+    by_size = Window.partitionBy("perturbation").orderBy(F.abs("change").desc(), F.col("gene").asc())
+    return (
+        sig.withColumn("rank", F.row_number().over(by_size))
+        .where(F.col("rank") <= N_TOP)
+        .select("perturbation", "rank", "gene", "change")
+    )
+
+
 def run(name: str, hold: bool) -> None:
     """Build Spark results for one dataset.
 
@@ -103,9 +118,11 @@ def run(name: str, hold: bool) -> None:
     cells = spark.read.parquet(str(src / "cells.parquet"))
     expression = spark.read.parquet(str(src / "expression.parquet"))
 
+    sig = signatures(cells, expression, control)
     tables = {
         "perturbations": perturbation_table(cells),
-        "signatures": signatures(cells, expression, control),
+        "signatures": sig,
+        "top_genes": top_genes(sig),
     }
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")
