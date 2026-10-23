@@ -1,18 +1,22 @@
 """Compute signatures and distances with PySpark in local mode from Parquet.
 
-data/processed/<name>/{cells,expression}.parquet -> cells per perturbation
+data/processed/<name>/{cells,expression,cell_pcs}.parquet -> cells per perturbation
   -> gene sums per perturbation -> full grid of averages -> minus control averages -> top genes per perturbation
   -> Euclidean pair distances -> nearest perturbations
-  cells -> MD5 sample per perturbation
-  -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean,sampled_cells}/
+  cells -> MD5 sample per perturbation -> sampled cells' PCs bundled per perturbation
+  -> E-distance per pair (plain Python udf) -> nearest perturbations
+  -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean,
+     sampled_cells,edistance,similar_edistance}/
 """
 
 import argparse
 import time
 from pathlib import Path
 
+import numpy as np
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
+from pyspark.sql.types import DoubleType
 
 from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 
@@ -20,6 +24,7 @@ DRIVER_MEMORY = "8g"
 N_TOP = 50  # genes kept per perturbation
 N_SIMILAR = 20  # neighbors kept per perturbation
 N_SAMPLE = 100  # cells per perturbation for E-distance
+N_PAIR_PARTITIONS = 40  # E-distance pair-table chunks; ~4 per core
 
 
 def session() -> SparkSession:
@@ -160,10 +165,74 @@ def nearest(pairs: DataFrame) -> DataFrame:
     )
 
 
+def cell_groups(sampled: DataFrame, cell_pcs: DataFrame) -> DataFrame:
+    """Bundle each perturbation's sampled cells' PCs into one row.
+
+    In: sampled cells, cell PCs (cell_id, pc_1…pc_50).
+    Out: plan for table (perturbation, cells), cells = array of per-cell PC arrays (float64).
+    """
+    pcs = [F.col(c).cast("double") for c in cell_pcs.columns if c != "cell_id"]
+    return (
+        sampled.join(cell_pcs, "cell_id")
+        .groupBy("perturbation")
+        .agg(F.collect_list(F.array(*pcs)).alias("cells"))
+    )
+
+
+@F.udf(returnType=DoubleType(), useArrow=False)  # row-by-row pickled transfer, not Arrow batches
+def mean_distance_udf(x: list, y: list) -> float:
+    """Average straight-line distance over every (x cell, y cell) pair.
+
+    In: two lists of per-cell PC lists.
+    Out: mean distance; self pairs included when x is y.
+    """
+    x, y = np.asarray(x), np.asarray(y)
+    return float(np.sqrt(((x[:, None, :] - y[None, :, :]) ** 2).sum(axis=2)).mean())
+
+
+def within_spread(groups: DataFrame, fn) -> DataFrame:
+    """Average cell-to-cell distance inside each perturbation.
+
+    In: cell groups, mean-distance function (two cell-list columns -> double column).
+    Out: plan for table (perturbation, spread).
+    """
+    return groups.select("perturbation", fn("cells", "cells").alias("spread"))
+
+
+def cell_pairs(groups: DataFrame) -> DataFrame:
+    """Pair every perturbation with every later one alphabetically, carrying both cell lists.
+
+    In: cell groups.
+    Out: plan for table (a, cells_a, b, cells_b), N_PAIR_PARTITIONS chunks.
+    """
+    a = groups.select(F.col("perturbation").alias("a"), F.col("cells").alias("cells_a"))
+    b = groups.select(F.col("perturbation").alias("b"), F.col("cells").alias("cells_b"))
+    # split the small side before joining so the large pair rows never shuffle
+    return a.repartition(N_PAIR_PARTITIONS, "a").join(F.broadcast(b), F.col("a") < F.col("b"))
+
+
+def edistance(groups: DataFrame, fn) -> DataFrame:
+    """Compute E-distance between every pair of perturbations: 2 x between - spread a - spread b.
+
+    In: cell groups, mean-distance function (two cell-list columns -> double column).
+    Out: plan for table (a, b, distance), one row per pair, a before b alphabetically.
+    """
+    spread = within_spread(groups, fn).cache()  # read twice: a side, b side
+    spread_a = spread.select(F.col("perturbation").alias("a"), F.col("spread").alias("spread_a"))
+    spread_b = spread.select(F.col("perturbation").alias("b"), F.col("spread").alias("spread_b"))
+    return (
+        cell_pairs(groups)
+        .select("a", "b", fn("cells_a", "cells_b").alias("between"))
+        .join(F.broadcast(spread_a), "a")
+        .join(F.broadcast(spread_b), "b")
+        .select("a", "b", (2 * F.col("between") - F.col("spread_a") - F.col("spread_b")).alias("distance"))
+    )
+
+
 def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
     """Build Spark results for one dataset.
 
-    In: input folder with cells/expression Parquet, output folder, control label,
+    In: input folder with cells/expression/cell_pcs Parquet, output folder, control label,
       whether to keep Spark UI open at end.
     Out: none.
     State: writes out/.
@@ -174,10 +243,13 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
 
     cells = spark.read.parquet(str(src / "cells.parquet"))
     expression = spark.read.parquet(str(src / "expression.parquet"))
+    cell_pcs = spark.read.parquet(str(src / "cell_pcs.parquet"))
 
     sig = signatures(cells, expression, control)
     pairs = euclidean(sig).cache()  # used 3 times: written, both sides of nearest's union
-    sampled = sample_cells(cells).cache()  # used twice: written, counted per perturbation
+    sampled = sample_cells(cells).cache()  # used 3 times: written, counted, bundled
+    groups = cell_groups(sampled, cell_pcs).cache()  # used twice: spread, pairs
+    epairs = edistance(groups, mean_distance_udf).cache()  # used 3 times, like pairs
     tables = {
         "perturbations": perturbation_table(cells, sampled),
         "signatures": sig,
@@ -185,6 +257,8 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
         "euclidean": pairs,
         "similar_euclidean": nearest(pairs),
         "sampled_cells": sampled,
+        "edistance": epairs,
+        "similar_edistance": nearest(epairs),
     }
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")

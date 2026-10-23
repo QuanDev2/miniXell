@@ -9,14 +9,13 @@ Last updated: 2026-10-22.
 ## Current position
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user).
-  Last commit: `961024e` (docs: Phase 7 agent, demo page).
+  Last commit: `89def88` (step 4.1 + README).
 - **In progress:** Phase 4 (E-distance three ways), benchmarks dropped by
-  user. Step 4.1 done.
-- **Uncommitted:** step 4.1 (`pipeline/spark_signatures.py`, PLAN.md,
-  ARCHITECTURE.md, README.md, this file).
-- **Next:** step 4.2: pair table carrying both perturbations' sampled cells;
-  way 1 (plain Python `udf`) writes `edistance` + `similar_edistance`. Brief
-  the user (commented code snippets), wait for an explicit go.
+  user. Steps 4.1–4.2 done.
+- **Uncommitted:** step 4.2 (`pipeline/spark_signatures.py`, this file).
+- **Next:** step 4.3: way 2 (pandas in batches) plugged into `edistance(groups,
+  fn)`. Brief the user high level (function names and what they do), wait
+  for an explicit go.
 - **Phase 5 data source:** settled once Phase 4 is done: Spark covers every
   MongoDB document field, so `load_mongo.py` reads `spark/` only.
 
@@ -109,8 +108,8 @@ Replogle dataset. PLAN.md, ARCHITECTURE.md, README.md updated to match.
 
 | Step | What | Status | Commit |
 |---|---|---|---|
-| 4.1 | `sample_cells`: `F.md5(cell_id)` fingerprint, `row_number` per perturbation by (fingerprint, cell_id), keep ≤100; writes `sampled_cells` (23,290 rows); `perturbation_table` joins `sampled_cell_count`. Throwaway check vs legacy: same 23,290 (perturbation, cell_id) rows, fingerprints identical, no duplicates; `sampled_cell_count` equal for all 236, 12 below 100 (min 54). Parity suite: 10 passed (30 s). Full Norman job 77 s this run vs ~29 s in step 3.4; untouched stages were slower too (likely machine load, not checked) | Done | uncommitted |
-| 4.2 | Pair table + way 1 (plain Python `udf`) → `edistance`, `similar_edistance` | Next | — |
+| 4.1 | `sample_cells`: `F.md5(cell_id)` fingerprint, `row_number` per perturbation by (fingerprint, cell_id), keep ≤100; writes `sampled_cells` (23,290 rows); `perturbation_table` joins `sampled_cell_count`. Throwaway check vs legacy: same 23,290 (perturbation, cell_id) rows, fingerprints identical, no duplicates; `sampled_cell_count` equal for all 236, 12 below 100 (min 54). Parity suite: 10 passed (30 s). Full Norman job 77 s this run vs ~29 s in step 3.4; untouched stages were slower too (likely machine load, not checked) | Done | `89def88` |
+| 4.2 | `cell_groups` (sampled cells' 50 PCs as float64, `collect_list` per perturbation, 236 rows) → `cell_pairs` (a < b, small side repartitioned to 40 chunks then broadcast-joined, 27,730 rows carrying both cell lists) → `edistance(groups, fn)` = 2 × between − spread a − spread b, `fn` = `mean_distance_udf` (plain `udf`, `useArrow=False`, numpy inside; same expression as legacy `mean_distance`); `nearest` reused. Writes `edistance` (27,730), `similar_edistance` (4,720). Throwaway check vs legacy: no one-sided/duplicate rows, max gap 1.4e-14, 0 negative (min 0.1105), neighbor lists identical (max gap 8.9e-15). E-distance stage ~42 s (legacy 11.7 s); full job 125 s. Parity suite: 10 passed (35 s) | Done | uncommitted |
 | 4.3 | Way 2: pandas in batches | Pending | — |
 | 4.4 | Way 3: Scala `scala/edistance/` → jar → PySpark | Pending | — |
 | 4.5 | Parity tests: sampling, E-distance, similar lists; fixture + Norman | Pending | — |
