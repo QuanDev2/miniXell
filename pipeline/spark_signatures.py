@@ -4,7 +4,7 @@ data/processed/<name>/{cells,expression,cell_pcs}.parquet -> cells per perturbat
   -> gene sums per perturbation -> full grid of averages -> minus control averages -> top genes per perturbation
   -> Euclidean pair distances -> nearest perturbations
   cells -> MD5 sample per perturbation -> sampled cells' PCs bundled per perturbation
-  -> E-distance per pair (plain Python udf) -> nearest perturbations
+  -> E-distance per pair (plain Python udf or pandas batches, chosen by --edistance) -> nearest perturbations
   -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean,
      sampled_cells,edistance,similar_edistance}/
 """
@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType
@@ -25,6 +26,7 @@ N_TOP = 50  # genes kept per perturbation
 N_SIMILAR = 20  # neighbors kept per perturbation
 N_SAMPLE = 100  # cells per perturbation for E-distance
 N_PAIR_PARTITIONS = 40  # E-distance pair-table chunks; ~4 per core
+ARROW_BATCH_ROWS = 500  # pair rows per Arrow batch; ~80 KB each, so ~40 MB per batch
 
 
 def session() -> SparkSession:
@@ -39,6 +41,7 @@ def session() -> SparkSession:
         .appName("minixell-signatures")
         .config("spark.driver.memory", DRIVER_MEMORY)
         .config("spark.ui.showConsoleProgress", "false")  # progress bar overwrites log lines
+        .config("spark.sql.execution.arrow.maxRecordsPerBatch", str(ARROW_BATCH_ROWS))
         .getOrCreate()
     )
     spark.sparkContext.setLogLevel("WARN")
@@ -179,15 +182,36 @@ def cell_groups(sampled: DataFrame, cell_pcs: DataFrame) -> DataFrame:
     )
 
 
-@F.udf(returnType=DoubleType(), useArrow=False)  # row-by-row pickled transfer, not Arrow batches
-def mean_distance_udf(x: list, y: list) -> float:
+def mean_distance(x: np.ndarray, y: np.ndarray) -> float:
     """Average straight-line distance over every (x cell, y cell) pair.
 
-    In: two lists of per-cell PC lists.
+    In: two cell-by-PC arrays.
     Out: mean distance; self pairs included when x is y.
     """
-    x, y = np.asarray(x), np.asarray(y)
     return float(np.sqrt(((x[:, None, :] - y[None, :, :]) ** 2).sum(axis=2)).mean())
+
+
+@F.udf(returnType=DoubleType(), useArrow=False)  # row-by-row pickled transfer, not Arrow batches
+def mean_distance_udf(x: list, y: list) -> float:
+    """Apply mean_distance to one row's two cell lists.
+
+    In: two lists of per-cell PC lists.
+    Out: mean distance.
+    """
+    return mean_distance(np.asarray(x), np.asarray(y))
+
+
+@F.pandas_udf(DoubleType())  # Arrow batches of up to ARROW_BATCH_ROWS rows
+def mean_distance_pandas(x: pd.Series, y: pd.Series) -> pd.Series:
+    """Apply mean_distance to every row of one batch.
+
+    In: two columns of cell lists (each cell list = array of per-cell PC arrays).
+    Out: column of mean distances, same row order.
+    """
+    return pd.Series([mean_distance(np.stack(a), np.stack(b)) for a, b in zip(x, y)])
+
+
+EDISTANCE_FNS = {"udf": mean_distance_udf, "pandas": mean_distance_pandas}  # --edistance choices
 
 
 def within_spread(groups: DataFrame, fn) -> DataFrame:
@@ -229,11 +253,11 @@ def edistance(groups: DataFrame, fn) -> DataFrame:
     )
 
 
-def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
+def run(src: Path, out: Path, control: str, hold: bool = False, way: str = "udf") -> None:
     """Build Spark results for one dataset.
 
     In: input folder with cells/expression/cell_pcs Parquet, output folder, control label,
-      whether to keep Spark UI open at end.
+      whether to keep Spark UI open at end, E-distance way (EDISTANCE_FNS key).
     Out: none.
     State: writes out/.
     """
@@ -249,7 +273,7 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
     pairs = euclidean(sig).cache()  # used 3 times: written, both sides of nearest's union
     sampled = sample_cells(cells).cache()  # used 3 times: written, counted, bundled
     groups = cell_groups(sampled, cell_pcs).cache()  # used twice: spread, pairs
-    epairs = edistance(groups, mean_distance_udf).cache()  # used 3 times, like pairs
+    epairs = edistance(groups, EDISTANCE_FNS[way]).cache()  # used 3 times, like pairs
     tables = {
         "perturbations": perturbation_table(cells, sampled),
         "signatures": sig,
@@ -263,7 +287,7 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")
         table.write.mode("overwrite").parquet(str(out / table_name))
-        log(start, f"wrote {out.name}/{table_name}/")
+        log(start, f"wrote {out.name}/{table_name}/" + (f" ({way})" if table_name == "edistance" else ""))
 
     if hold:
         input("Spark UI open; press Enter to stop... ")
@@ -273,16 +297,17 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
 def main() -> None:
     """Build Spark results for datasets named on the command line.
 
-    In: one or more dataset names; --hold keeps Spark UI open until Enter.
+    In: one or more dataset names; --hold keeps Spark UI open until Enter; --edistance picks the way.
     Out: none.
     """
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("names", nargs="+", choices=sorted(COLUMNS))
     parser.add_argument("--hold", action="store_true", help="keep Spark UI open until Enter")
+    parser.add_argument("--edistance", choices=sorted(EDISTANCE_FNS), default="udf", help="E-distance way")
     args = parser.parse_args()
     for name in args.names:
         src = PROCESSED_DIR / name
-        run(src, src / "spark", COLUMNS[name]["control"], args.hold)
+        run(src, src / "spark", COLUMNS[name]["control"], args.hold, args.edistance)
 
 
 if __name__ == "__main__":
