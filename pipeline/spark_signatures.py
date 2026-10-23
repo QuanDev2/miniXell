@@ -8,6 +8,7 @@ data/processed/<name>/{cells,expression}.parquet -> cells per perturbation
 
 import argparse
 import time
+from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
@@ -137,19 +138,18 @@ def nearest(pairs: DataFrame) -> DataFrame:
     )
 
 
-def run(name: str, hold: bool) -> None:
+def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
     """Build Spark results for one dataset.
 
-    In: dataset name with entry in COLUMNS, whether to keep Spark UI open at end.
+    In: input folder with cells/expression Parquet, output folder, control label,
+      whether to keep Spark UI open at end.
     Out: none.
-    State: writes data/processed/<name>/spark/.
+    State: writes out/.
     """
     start = time.perf_counter()
     spark = session()
     log(start, f"Spark started; UI at {spark.sparkContext.uiWebUrl}")
 
-    src, out = PROCESSED_DIR / name, PROCESSED_DIR / name / "spark"
-    control = COLUMNS[name]["control"]
     cells = spark.read.parquet(str(src / "cells.parquet"))
     expression = spark.read.parquet(str(src / "expression.parquet"))
 
@@ -165,7 +165,7 @@ def run(name: str, hold: bool) -> None:
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")
         table.write.mode("overwrite").parquet(str(out / table_name))
-        log(start, f"wrote spark/{table_name}/")
+        log(start, f"wrote {out.name}/{table_name}/")
 
     if hold:
         input("Spark UI open; press Enter to stop... ")
@@ -183,7 +183,8 @@ def main() -> None:
     parser.add_argument("--hold", action="store_true", help="keep Spark UI open until Enter")
     args = parser.parse_args()
     for name in args.names:
-        run(name, args.hold)
+        src = PROCESSED_DIR / name
+        run(src, src / "spark", COLUMNS[name]["control"], args.hold)
 
 
 if __name__ == "__main__":

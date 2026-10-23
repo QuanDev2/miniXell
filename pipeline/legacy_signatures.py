@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import resource
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -22,14 +23,13 @@ N_SIMILAR = 20  # neighbors kept per perturbation per metric
 N_SAMPLE = 100  # cells per perturbation for E-distance
 
 
-def load(name: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load(src: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Read cells, expression, cell PC tables.
 
-    In: dataset name.
+    In: input folder.
     Out: cells (cell_id, perturbation), expression (cell_id, gene, value; non-zero only),
       pcs (cell_id, pc_1..pc_50).
     """
-    src = PROCESSED_DIR / name
     cells = pd.read_parquet(src / "cells.parquet", columns=["cell_id", "perturbation"])
     expression = pd.read_parquet(src / "expression.parquet")
     pcs = pd.read_parquet(src / "cell_pcs.parquet")
@@ -194,16 +194,15 @@ def check_similar(similar: pd.DataFrame, metric: str, example: str) -> None:
     print(f"    {example}: " + ", ".join(f"{r.neighbor} ({r.distance:.3f})" for r in top.itertuples()))
 
 
-def run(name: str) -> None:
+def run(src: Path, out: Path, control: str) -> None:
     """Build answer key for one dataset.
 
-    In: dataset name with entry in COLUMNS.
+    In: input folder with cells/expression/cell_pcs Parquet, output folder, control label.
     Out: none.
-    State: writes data/processed/<name>/legacy/.
+    State: writes out/.
     """
     start = time.perf_counter()
-    control = COLUMNS[name]["control"]
-    cells, expression, pcs = load(name)
+    cells, expression, pcs = load(src)
     log(start, f"loaded {len(cells):,} cells, {len(expression):,} expression rows, {len(pcs):,} PC rows")
 
     means, counts = gene_means(cells, expression)
@@ -224,7 +223,6 @@ def run(name: str) -> None:
     esimilar = nearest(epairs)
     log(start, f"edistance: {len(epairs):,} pairs")
 
-    out = PROCESSED_DIR / name / "legacy"
     out.mkdir(parents=True, exist_ok=True)
     tables = {
         "perturbations": perturbation_table(counts, sampled, control),
@@ -238,7 +236,7 @@ def run(name: str) -> None:
     }
     for table_name, table in tables.items():
         table.to_parquet(out / f"{table_name}.parquet", index=False)
-        log(start, f"wrote legacy/{table_name}.parquet ({len(table):,} rows)")
+        log(start, f"wrote {out.name}/{table_name}.parquet ({len(table):,} rows)")
 
     check_targets(ranked)
     check_similar(similar, "euclidean", "KLF1")
@@ -261,7 +259,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("names", nargs="+", choices=sorted(COLUMNS))
     for name in parser.parse_args().names:
-        run(name)
+        src = PROCESSED_DIR / name
+        run(src, src / "legacy", COLUMNS[name]["control"])
 
 
 if __name__ == "__main__":
