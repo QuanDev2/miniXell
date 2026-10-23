@@ -15,7 +15,7 @@ Each phase lists:
 Four things to show:
 
 1. Parity test passing, plus a bug it caught.
-2. E-distance three ways in Spark (plain Python, pandas batches, Scala), each
+2. E-distance two ways in Spark (plain Python, pandas batches), each
    parity-checked.
 3. Live API call: a perturbation's similar perturbations and Claude's
    explanation.
@@ -34,7 +34,6 @@ miniXell/
 │   ├── legacy_signatures.py # single-machine reference
 │   ├── spark_signatures.py  # PySpark job
 │   └── load_mongo.py        # results → MongoDB
-├── scala/edistance/         # sbt project → jar loaded by PySpark
 ├── api/                     # FastAPI app; static/ = demo page (phase 6); agent/ = research assistant (phase 7)
 ├── tests/                   # unit, parity, API; fixtures/ = tiny dataset
 ├── docker-compose.yml       # local MongoDB
@@ -127,27 +126,26 @@ From scPerturb (Zenodo record 13350497).
 
 **Interview line**: "Migrated the analysis to PySpark and proved equivalence with an automated parity test."
 
-## Phase 4: E-distance three ways (1 day)
+## Phase 4: E-distance two ways (done)
 
 Benchmarks dropped (user's call): no benchmark scripts, charts, or Replogle
-dataset. The job log's stage times are the only timings.
+dataset. The job log's stage times are the only timings. Scala way deferred
+(user's call: go with PySpark).
 
 **Build**
 - Spark sampling with the legacy MD5 rule: `sampled_cells`,
   `sampled_cell_count`.
-- E-distance in Spark three ways: plain Python `udf`, pandas in batches,
-  Scala function from `scala/edistance/` (sbt → jar, loaded by PySpark);
-  writes `edistance`, `similar_edistance`.
-- All three parity-checked against the legacy answer key; parity tests extended.
+- E-distance in Spark two ways: plain Python `udf` and pandas in batches,
+  chosen by `--edistance`; writes `edistance`, `similar_edistance`.
+- Both parity-checked against the legacy answer key; parity tests extended.
 
 **Learn along the way**
 - Why data crossing between the Java runtime and Python costs time; batch
   (Arrow) vs row-by-row transfer.
-- Scala basics: syntax, types, sbt, jars.
 
-**Done when**: all three implementations pass parity on the fixture and Norman; Spark output covers every MongoDB document field.
+**Done when**: both implementations pass parity on the fixture and Norman; Spark output covers every MongoDB document field.
 
-**Interview line**: "Ported the heaviest calculation three ways, from Python to Scala, and proved each matches the reference."
+**Interview line**: "Ported the heaviest calculation to PySpark two ways, row-by-row and batched, and proved both match the reference."
 
 ## Phase 5: MongoDB + FastAPI + CI (1 day)
 
@@ -231,7 +229,7 @@ records saved.
 
 | Phase | Build |
 |---|---|
-| 8 | AWS: S3 zones, Spark job + Scala jar on EMR Serverless, MongoDB Atlas, API on ECS Fargate via ECR, secrets in Secrets Manager, billing alarm |
+| 8 | AWS: S3 zones, Spark job on EMR Serverless, MongoDB Atlas, API on ECS Fargate via ECR, secrets in Secrets Manager, billing alarm |
 | 9 | CD: GitHub Actions deploys to AWS on merge, OIDC credentials |
 | 10 | Insight service: explain and agent move behind SQS into their own ECS service; dead-letter queue |
 
@@ -243,8 +241,7 @@ pathway-level analysis.
 ## If time runs short
 
 Cut in this order: phase 7 (agent; depends on phase 6) → phase 6 (explain
-becomes a whiteboard answer) → Scala implementation (keep plain Python vs
-pandas batches). Phases 0–3 are the minimum credible demo.
+becomes a whiteboard answer). Phases 0–3 are the minimum credible demo.
 
 ## Alongside every phase
 

@@ -23,8 +23,8 @@ The MVP shows one claim, end to end:
    and keeps each one's 20 closest matches.
 4. Proves the PySpark pipeline matches a single-machine reference
    implementation (parity test, run in CI).
-5. Computes the heaviest calculation, E-distance, in Spark three ways: plain
-   Python, pandas batches, and Scala.
+5. Computes the heaviest calculation, E-distance, in Spark two ways: plain
+   Python row by row, and pandas in batches.
 6. Serves results through FastAPI backed by MongoDB, with Claude explaining a
    signature in plain biological language.
 7. Answers open questions with a research agent: Claude picks what to look up
@@ -40,7 +40,6 @@ flowchart LR
   RAW["Public lab file<br/>(h5ad)"] --> PQ["Parquet files<br/>cell, gene, value"]
   PQ --> LEG["Legacy reference<br/>one Python file, all in memory"]
   PQ --> SPK["PySpark job<br/>signatures + distances"]
-  SCALA["Scala E-distance<br/>function"] --> SPK
   LEG --> PAR{"Parity test<br/>same answers?"}
   SPK --> PAR
   SPK --> MDB[("MongoDB<br/>one record per perturbation")]
@@ -58,7 +57,7 @@ Everything runs locally. AWS deployment follows the MVP.
 
 | Concern | Choice |
 |---|---|
-| Language | Python 3.12, Scala (one Spark function) |
+| Language | Python 3.12 |
 | Distributed processing | PySpark (local mode in MVP) |
 | Storage | Parquet files |
 | Database | MongoDB (Docker locally) |
@@ -77,5 +76,5 @@ Everything runs locally. AWS deployment follows the MVP.
 
 ## Status
 
-Phase 4 (E-distance three ways) in progress. Details:
+Phase 5 (MongoDB + FastAPI + CI) next. Details:
 [docs/PROGRESS.md](docs/PROGRESS.md).

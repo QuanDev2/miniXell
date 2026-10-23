@@ -1,7 +1,8 @@
 """Check Spark outputs match the legacy answer key.
 
-tests/fixtures/tiny/ -> run legacy + Spark into temp folder -> line up rows per table
+tests/fixtures/tiny/ -> run legacy + Spark (udf way) into temp folder -> line up rows per table
 data/processed/norman/{legacy,spark}/ (if present) -> same checks
+tests/fixtures/tiny/ -> Spark (pandas way) -> E-distance vs same legacy output
 """
 
 from pathlib import Path
@@ -74,6 +75,7 @@ def gap(m: pd.DataFrame, col: str) -> float:
 def test_perturbations(root):
     m = matched(root, "perturbations", ["name"])
     assert (m["cell_count_legacy"] == m["cell_count_spark"]).all()
+    assert (m["sampled_cell_count_legacy"] == m["sampled_cell_count_spark"]).all()
     assert all(list(a) == list(b) for a, b in zip(m["target_genes_legacy"], m["target_genes_spark"]))
 
 
@@ -97,4 +99,27 @@ def test_euclidean(root):
 def test_similar_euclidean(root):
     m = matched(root, "similar_euclidean", ["perturbation", "rank"])
     assert (m["neighbor_legacy"] == m["neighbor_spark"]).all()
+    assert gap(m, "distance") <= TOL
+
+
+def test_sampled_cells(root):
+    m = matched(root, "sampled_cells", ["perturbation", "cell_id"])
+    assert (m["fingerprint_legacy"] == m["fingerprint_spark"]).all()
+
+
+def test_edistance(root):
+    m = matched(root, "edistance", ["a", "b"])
+    assert gap(m, "distance") <= TOL
+
+
+def test_similar_edistance(root):
+    m = matched(root, "similar_edistance", ["perturbation", "rank"])
+    assert (m["neighbor_legacy"] == m["neighbor_spark"]).all()
+    assert gap(m, "distance") <= TOL
+
+
+def test_edistance_pandas_way(tiny, tmp_path):
+    spark_signatures.run(FIXTURE, tmp_path / "spark", CONTROL, way="pandas")
+    (tmp_path / "legacy").symlink_to(tiny / "legacy")
+    m = matched(tmp_path, "edistance", ["a", "b"])
     assert gap(m, "distance") <= TOL

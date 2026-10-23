@@ -5,8 +5,8 @@ The MVP is a laptop-scale migration demo:
 - a **legacy reference**: single-machine Python, all data in memory;
 - the **new pipeline**: PySpark, work split across workers;
 - a **parity test** proving both give the same answers;
-- **E-distance three ways** in Spark (plain Python, pandas batches, Scala),
-  each checked against the reference;
+- **E-distance two ways** in Spark (plain Python, pandas batches), each
+  checked against the reference;
 - an **API** serving results, with AI explanations;
 - a **research agent** answering open questions from those results.
 
@@ -22,7 +22,6 @@ flowchart LR
   RAW["Public lab file<br/>(h5ad)"] --> PQ["Parquet files<br/>cell, gene, value"]
   PQ --> LEG["Legacy reference<br/>one Python file, all in memory"]
   PQ --> SPK["PySpark job<br/>signatures + distances"]
-  SCALA["Scala E-distance<br/>function"] --> SPK
   LEG --> PAR{"Parity test<br/>same answers?"}
   SPK --> PAR
   SPK --> MDB[("MongoDB<br/>one record per perturbation")]
@@ -103,7 +102,7 @@ answer.
 Role in the system: the **batch layer**. It runs occasionally (minutes),
 writes results, and exits. It is not the backend; FastAPI is.
 
-### E-distance, three ways
+### E-distance, two ways
 
 E-distance between perturbations A and B compares individual cells: average
 distance between an A cell and a B cell, minus the average spread inside A and
@@ -112,21 +111,17 @@ runs on a fixed sample of up to 100 cells per perturbation, using their 50
 principal components. Step-by-step walkthrough: [CONCEPTS.md](CONCEPTS.md)
 sections 6–7.
 
-| Implementation | How it works | Expected speed |
+| Implementation | How it works | Stage time on Norman (single run) |
 |---|---|---|
-| Plain Python function (`udf`) | Spark ships data to Python one row at a time | Slowest |
-| Grouped pandas (`applyInPandas`) | Spark ships each group's cells to Python in bulk; numpy does the math | Fast |
-| Scala function | Runs inside Spark's Java runtime; no copying to Python | Fast |
+| Plain Python function (`udf`, default) | Spark ships each pair row to Python one at a time | ~42 s |
+| pandas batches (`pandas_udf`) | Spark ships 500 pair rows at a time as one Arrow block; numpy does the math | ~31 s |
 
-Spark does the logistics in all three: reading, splitting, grouping, pairing,
-collecting, writing. The function only computes one pair's number.
+Spark does the logistics in both: reading, splitting, grouping, pairing,
+collecting, writing. The function only computes one pair's average cell
+distance. Pick with `--edistance udf|pandas`.
 
-### Scala
-
-A language that runs on the Java runtime; Spark's native language. .NET
-analogy: Scala is to Java what F# is to C#. Built with sbt and packaged as a
-jar that PySpark loads. Used here for one speed-critical function, the
-typical reason teams reach for it in Spark.
+A third way, a Scala function running inside Spark's Java runtime with no
+copying to Python (sbt project → jar loaded by PySpark), is deferred.
 
 ### Parity test
 
@@ -371,7 +366,7 @@ AWS. Spark code is the same in local mode and on a cluster.
 ```mermaid
 flowchart LR
   subgraph Batch["Batch processing"]
-    RAW["S3 raw zone"] --> SPARK["EMR Serverless<br/>PySpark + Scala jar"]
+    RAW["S3 raw zone"] --> SPARK["EMR Serverless<br/>PySpark job"]
     SPARK --> CUR["S3 curated zone"]
   end
   SPARK --> MDB[("MongoDB Atlas")]

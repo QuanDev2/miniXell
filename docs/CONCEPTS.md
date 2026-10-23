@@ -172,7 +172,7 @@ same way and one scattering them randomly can share an average and still
 behave differently.
 
 **Cost.** About 30,000 cell distances per pair, times ~20,000 pairs. That's
-why it's the expensive calculation, the one benchmarked in Python vs Scala.
+why it's the expensive calculation, the one ported to Spark two ways.
 
 | | Euclidean | E-distance |
 |---|---|---|
