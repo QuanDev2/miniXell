@@ -4,18 +4,20 @@ Handoff log: where the build stands, what's done, what's next. Updated after
 every step. Phases are defined in [PLAN.md](PLAN.md); steps within a phase are
 defined here.
 
-Last updated: 2026-10-18.
+Last updated: 2026-10-22.
 
 ## Current position
 
-- **Done:** Phase 0, Phase 1, Phase 2, steps 3.1–3.6. Last commit: `b4530fd`
-  (step 3.5).
-- **Uncommitted:** step 3.6 (`tests/fixtures/make_tiny.py`,
-  `tests/fixtures/tiny/*.parquet`, `tests/test_parity.py`, both pipeline
-  scripts, `pyproject.toml`, `docs/notes/spark-translation.md`, this file).
-- **Next:** step 3.7 (deliberate bug caught by parity). Brief the user
-  (commented code snippets; see "Working with this user"), wait for an
-  explicit go.
+- **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user).
+  Last commit: `70bb9bc` (step 3.6).
+- **Skipped:** Phase 4 (E-distance three ways + benchmarks), user's call.
+  Spark has no E-distance or `sampled_cell_count`; legacy has both.
+- **Uncommitted:** this file (3.6 hash, 3.7 skipped, Phase 3 closed,
+  Phase 4 skipped, Phase 7 added); PLAN.md and ARCHITECTURE.md (Phase 7
+  research assistant agent, demo page).
+- **Next:** Phase 5 (MongoDB + FastAPI + CI). Decide which outputs feed
+  MongoDB (legacy, Spark, or mixed), define steps, brief the user (commented
+  code snippets), wait for an explicit go per step.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -82,7 +84,7 @@ Single-machine baseline (step 2.5, clean run, Apple M4):
 Peak memory 2.4 GB. Imports include scanpy because the script reuses
 `log`/`PROCESSED_DIR` from `convert.py`; time inside `run()` for benchmarks.
 
-## Phase 3: PySpark job + parity (in progress)
+## Phase 3: PySpark job + parity (done)
 
 Run: `uv run --env-file .env python -m pipeline.spark_signatures norman`
 (`--hold` keeps the Spark UI at `localhost:4040` open until Enter).
@@ -96,8 +98,8 @@ Each build step runs a throwaway comparison against `legacy/`.
 | 3.3 | Window `row_number` per perturbation by abs(change) desc, gene asc; keep ≤50; writes `top_genes` (11,800 rows). Identical genes at every rank vs legacy, max gap 0.0. Plan: reads cached grid; `WindowGroupLimit` trims to top 50 per worker before the shuffle | Done | `3d80ef3` |
 | 3.4 | Self-join signatures on gene (a < b) → sum squared gaps → sqrt; cached; union both directions → window rank ≤20; writes `euclidean` (27,730 rows), `similar_euclidean` (4,720). Max gap vs legacy 2.7e-15; neighbor rankings identical. SortMergeJoin output 57,290,180 rows, run once (cache). Full job ~29 s (euclidean ~10 s vs 0.1 s numpy) | Done | `b0f7789` |
 | 3.5 | `tests/test_parity.py`: 5 tests (perturbations counts + target genes, signatures ≤1e-9, top-10 genes identical, euclidean ≤1e-9, similar lists identical); skips if outputs missing. Run: `uv run pytest tests/test_parity.py -v` → 5 passed in 0.5 s. Tamper check: +1e-6 on one signature and one dropped pair → 2 failed, restored → 5 passed | Done | `b4530fd` |
-| 3.6 | `tests/fixtures/make_tiny.py` → `tests/fixtures/tiny/` (committed, 108 KB): 6 perturbations + control, 240 cells, 40 genes (5 targets + first 35 A–Z seen in kept cells), 1,723 expression rows, 110 zero-only (perturbation, gene) pairs. Both pipelines' `run(src, out, control)` take folders; CLIs unchanged. Test runs both pipelines on the fixture (session fixture, temp folder) and checks Norman if present: 10 passed (~20 s, needs Java: `uv run --env-file .env pytest`); without Norman outputs 5 passed, 5 skipped | Done | uncommitted |
-| 3.7 | Deliberate bug (÷ rows present) caught by parity, reverted; write-up in `docs/notes/` | Next | |
+| 3.6 | `tests/fixtures/make_tiny.py` → `tests/fixtures/tiny/` (committed, 108 KB): 6 perturbations + control, 240 cells, 40 genes (5 targets + first 35 A–Z seen in kept cells), 1,723 expression rows, 110 zero-only (perturbation, gene) pairs. Both pipelines' `run(src, out, control)` take folders; CLIs unchanged. Test runs both pipelines on the fixture (session fixture, temp folder) and checks Norman if present: 10 passed (~20 s, needs Java: `uv run --env-file .env pytest`); without Norman outputs 5 passed, 5 skipped | Done | `70bb9bc` |
+| 3.7 | Deliberate bug (÷ rows present) caught by parity, reverted; write-up in `docs/notes/` | Skipped (user's call; PLAN "done when" bug demo not done) | — |
 
 `sampled_cell_count` and E-distance in Spark come in Phase 4. AI-assistant
 translation mistakes get logged in `docs/notes/` as they happen (PLAN.md).
@@ -155,6 +157,15 @@ translation mistakes get logged in `docs/notes/` as they happen (PLAN.md).
   alphabetically); similar lists rank by distance, ties by neighbor name A→Z,
   `rank` stored. Distances computed with plain numpy (no scipy; it's only a
   transitive dependency); matches scipy's exact function to 1e-14.
+- Phase 7 added to the MVP: research assistant agent (`POST /ask`), design in
+  ARCHITECTURE.md. Single agent, hand-written tool loop, five read-only tools,
+  ledger-based guardrail, run records in `agent_runs`. User approved
+  2026-10-22. Post-MVP phases renumbered 8–10; cut order now starts with
+  phase 7.
+- Demo page ("Option B"): one static HTML page served by FastAPI, built in
+  phase 6 (search, top genes, similar, Explain), extended in phase 7 (Ask box).
+  Phase 6 estimate now 1–1.5 days. User approved 2026-10-22.
+- `/ask` and the explain endpoint both stay (user's call, 2026-10-22).
 
 ## Open items
 

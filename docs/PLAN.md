@@ -12,13 +12,15 @@ Each phase lists:
 
 ## MVP goal
 
-Four things to show:
+Five things to show:
 
 1. Parity test passing, plus a bug it caught.
 2. Scale chart: legacy vs Spark, time and peak memory.
 3. Three-way chart: E-distance as plain Python vs grouped pandas vs Scala.
 4. Live API call: a perturbation's similar perturbations and Claude's
    explanation.
+5. Live agent question: an open question answered with the trail of lookups
+   behind it.
 
 ## Repo layout
 
@@ -34,7 +36,7 @@ miniXell/
 │   └── load_mongo.py        # results → MongoDB
 ├── scala/edistance/         # sbt project → jar loaded by PySpark
 ├── benchmarks/              # scale + three-way scripts, results/
-├── api/                     # FastAPI app
+├── api/                     # FastAPI app; static/ = demo page (phase 6); agent/ = research assistant (phase 7)
 ├── tests/                   # unit, parity, API; fixtures/ = tiny dataset
 ├── docker-compose.yml       # local MongoDB
 ├── pyproject.toml
@@ -154,7 +156,8 @@ From scPerturb (Zenodo record 13350497).
 **Build**
 - `pipeline/load_mongo.py`: one document per perturbation (see ARCHITECTURE.md);
   index on name; index for gene lookups.
-- `api/`: FastAPI endpoints from ARCHITECTURE.md; async MongoDB driver;
+- `api/`: FastAPI endpoints from ARCHITECTURE.md; MongoDB queries in
+  `api/repository.py` (reused by phase 7 tools); async MongoDB driver;
   Pydantic response models; tests against a test database.
 - `.github/workflows/ci.yml`: lint, unit tests, API tests, parity on fixture.
 
@@ -168,7 +171,7 @@ From scPerturb (Zenodo record 13350497).
 
 **Interview line**: "Python backend with typed contracts, tested in CI, with parity as a merge gate."
 
-## Phase 6: Claude explain endpoint (0.5–1 day)
+## Phase 6: Claude explain endpoint + demo page (1–1.5 days)
 
 **Build**
 - Fetch public gene descriptions (NCBI Gene via mygene.info) for signature
@@ -179,15 +182,50 @@ From scPerturb (Zenodo record 13350497).
   descriptions.
 - Decide access: Anthropic API key (simplest locally) or Amazon Bedrock
   (needs AWS account; matches post-MVP).
+- Demo page `api/static/index.html`: one static HTML page served by FastAPI,
+  plain JavaScript, no build step. Search box → perturbation's top genes and
+  similar list → Explain button shows Claude's text, or the guardrail's
+  rejection.
 
 **Learn along the way**
 - Calling an LLM API; prompt design; token cost and latency.
 - Grounding (retrieval-augmented generation): fetch facts first, let the model
   explain only those.
+- Serving a static page from FastAPI; calling the API from the browser with
+  `fetch`.
 
-**Done when**: explanations return for several perturbations; guardrail test rejects a planted made-up gene.
+**Done when**: explanations return for several perturbations, from the demo page; guardrail test rejects a planted made-up gene.
 
 **Interview line**: "AI explains computed results and is blocked from inventing them, matching protoXell's rule."
+
+## Phase 7: Research assistant agent (1–1.5 days)
+
+Needs phase 5 (query layer) and phase 6 (`genes` collection, Claude access,
+guardrail). Design: ARCHITECTURE.md, "Research assistant agent".
+
+**Build**
+- `POST /ask`: Claude answers open questions by calling five read-only tools
+  over MongoDB; returns the answer plus every lookup it made.
+- Hand-written tool loop in `api/agent/` with limits (8 tool calls, 30 s,
+  token cap); ledger + guardrail shared with phase 6; each run saved to
+  `agent_runs`.
+- Demo page gets an Ask box: answer plus its step list.
+- Tests: tools against the test database, loop against a scripted fake model,
+  guardrail with a planted made-up gene and a wrong number.
+- `/ask` sits alongside the phase 6 explain endpoint; both stay.
+
+**Learn along the way**
+- Tool use: how a model requests an action and code carries it out.
+- Agent loops: limits, stopping, running several tool requests at once with
+  asyncio.
+- Grounding for agents: checking answers against what the tools returned; run
+  records for reproducibility.
+
+**Done when**: `/ask` answers several open questions with step lists, from the
+demo page; guardrail rejects a planted made-up gene and a wrong number; run
+records saved.
+
+**Interview line**: "The agent picks what to look up; code computes and verifies; every answer carries its trail."
 
 ---
 
@@ -195,9 +233,9 @@ From scPerturb (Zenodo record 13350497).
 
 | Phase | Build |
 |---|---|
-| 7 | AWS: S3 zones, Spark job + Scala jar on EMR Serverless, MongoDB Atlas, API on ECS Fargate via ECR, secrets in Secrets Manager, billing alarm |
-| 8 | CD: GitHub Actions deploys to AWS on merge, OIDC credentials |
-| 9 | Insight service: explain moves behind SQS into its own ECS service; dead-letter queue |
+| 8 | AWS: S3 zones, Spark job + Scala jar on EMR Serverless, MongoDB Atlas, API on ECS Fargate via ECR, secrets in Secrets Manager, billing alarm |
+| 9 | CD: GitHub Actions deploys to AWS on merge, OIDC credentials |
+| 10 | Insight service: explain and agent move behind SQS into their own ECS service; dead-letter queue |
 
 Stretch, unordered: tiny Node.js legacy API migrated to FastAPI with an API
 parity test; AI migration agent (Claude translates legacy code, parity
@@ -206,9 +244,10 @@ pathway-level analysis.
 
 ## If time runs short
 
-Cut in this order: phase 6 (explain becomes a whiteboard answer) → scale
-benchmark (keep three-way) → Scala implementation (keep plain Python vs
-grouped pandas). Phases 0–3 are the minimum credible demo.
+Cut in this order: phase 7 (agent; depends on phase 6) → phase 6 (explain
+becomes a whiteboard answer) → scale benchmark (keep three-way) → Scala
+implementation (keep plain Python vs grouped pandas). Phases 0–3 are the
+minimum credible demo.
 
 ## Alongside every phase
 

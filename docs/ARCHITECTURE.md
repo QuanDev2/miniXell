@@ -6,7 +6,8 @@ The MVP is a laptop-scale migration demo:
 - the **new pipeline**: PySpark, work split across workers;
 - a **parity test** proving both give the same answers;
 - **benchmarks** showing where Spark and Scala pay off;
-- an **API** serving results, with AI explanations.
+- an **API** serving results, with AI explanations;
+- a **research agent** answering open questions from those results.
 
 ## The domain
 
@@ -25,14 +26,18 @@ flowchart LR
   SPK --> PAR
   SPK --> MDB[("MongoDB<br/>one record per perturbation")]
   MDB --> API["FastAPI"]
+  WEB["Demo page<br/>one HTML file"] --> API
   API --> CL["Claude<br/>explains a signature"]
+  API --> AG["Research agent<br/>Claude + read-only tools"]
+  AG --> MDB
   CI["GitHub Actions CI<br/>runs parity on every push"] -.-> PAR
 ```
 
 Flow: download lab file → convert to Parquet → PySpark computes signatures and
 distances → top 20 matches per perturbation → MongoDB → FastAPI serves them →
-Claude explains a signature on request. The legacy reference runs the same math
-on one machine; the parity test compares the two.
+Claude explains a signature on request; the research agent answers open
+questions by looking results up. The legacy reference runs the same math on
+one machine; the parity test compares the two.
 
 ## Components
 
@@ -229,6 +234,20 @@ Public gene descriptions used to ground Claude's explanations.
 |---|---|
 | `{symbol: 1}`, unique | Look up descriptions for a signature's genes |
 
+#### Collection `agent_runs` (phase 7)
+
+One record per research-agent question, so any answer can be replayed and
+audited.
+
+| Field | Meaning |
+|---|---|
+| `question` | User's question |
+| `model`, `prompt_version` | Claude model ID and system-prompt version used |
+| `steps` | Each tool call: name, inputs, output, milliseconds |
+| `answer` | Final answer text (or "couldn't answer") |
+| `guardrail` | Pass, or the violations found |
+| `tokens`, `duration_ms`, `created_at` | Cost and timing |
+
 ### FastAPI
 
 A Python framework for HTTP APIs. .NET analogy: ASP.NET Core minimal APIs.
@@ -242,6 +261,15 @@ auto-generated docs page at `/docs`.
 | `GET /perturbations/{name}` | one perturbation's document |
 | `GET /perturbations/{name}/similar?metric=` | its 20 closest matches |
 | `POST /perturbations/{name}/explain` | Claude's explanation of the signature |
+| `POST /ask` | research agent's answer to an open question, plus its steps (phase 7) |
+
+### Demo page (phase 6)
+
+One static HTML file (`api/static/index.html`) served by FastAPI; plain
+JavaScript, no build step, no second app. Search box → a perturbation's top
+genes and similar list → Explain button shows Claude's text, or the
+guardrail's rejection. Phase 7 adds an Ask box showing the agent's answer and
+its step list. FastAPI's `/docs` page stays as the developer view.
 
 ### Claude explanation
 
@@ -255,6 +283,70 @@ descriptions, sends both to Claude, and returns the explanation.
 
 Mirrors protoXell's rule: "The LLM does not generate or alter results; it only
 interprets deterministic outputs."
+
+### Research assistant agent (phase 7)
+
+Answers open questions about the results, e.g. "Which perturbations act like
+KLF1, and what do they share?" Claude chooses what to look up; code fetches
+the data, does all math, and checks every name in the answer. Each answer
+returns with the lookups that produced it.
+
+```mermaid
+flowchart LR
+  UI["Demo page"] -->|POST /ask| R["ask route"]
+  R --> L["Agent loop"]
+  L <-->|messages + tool list| M["Model client → Claude"]
+  L -->|tool calls| T["Tool registry"]
+  T --> Q["Query layer"]
+  Q --> DB[("MongoDB")]
+  T -->|results| G["Ledger"]
+  L -->|draft answer| V["Guardrail"]
+  G --> V
+  V -->|fail: one retry| L
+  V -->|pass| S["Run store"]
+  S --> DB
+  S -->|answer + steps| R
+```
+
+Flow: question → Claude gets the tool list → asks for a tool → code runs it and
+returns the result → repeat until a final answer → guardrail → run saved →
+answer + steps returned.
+
+| Piece | File | Job |
+|---|---|---|
+| Query layer | `api/repository.py` | MongoDB queries shared by endpoints and tools; a tool can't disagree with an endpoint |
+| Tools | `api/agent/tools.py` | Five tools: name, description, typed inputs, function; typed inputs generate what Claude reads and validate its requests |
+| Model client | `api/agent/llm.py` | Interface with a real Claude client and a scripted fake for tests; Bedrock swaps in here |
+| Loop | `api/agent/loop.py` | Sends messages, runs requested tools (several at once with `asyncio.gather`), enforces limits |
+| Ledger + guardrail | `api/agent/guardrail.py` | Records tool outputs; checks the answer; shared with the explain endpoint |
+| Run store | `api/agent/runs.py` | Saves each run to `agent_runs` |
+| Route | `api/routes/ask.py` | `POST /ask` → `{answer, steps[]}` |
+
+| Tool (all read-only) | Returns |
+|---|---|
+| `get_perturbation(name)` | Target genes, cell count, top genes |
+| `get_similar(name, metric)` | 20 closest perturbations |
+| `find_by_gene(gene)` | Perturbations with that gene in their top 50 |
+| `get_gene_descriptions(symbols)` | Public descriptions from `genes` |
+| `compare_signatures(a, b)` | Shared top genes and whether each moved the same or opposite way, computed in Python |
+
+Rules:
+
+- **One agent, hand-written loop.** Anthropic's Python library with tool use;
+  no agent framework, no multiple agents.
+- **Small computed facts.** Tools return compact results (top 10 genes unless
+  asked for more); the model never calculates.
+- **No memory between questions.** Each question starts fresh.
+- **Limits in code.** 8 tool calls, 30 s, token cap; hitting one returns
+  "couldn't answer."
+- **System prompt.** Use only tool data; say "not in the data" when missing;
+  never calculate; name sources.
+- **Guardrail.** Vocabulary = every gene symbol and perturbation name in the
+  dataset. A vocabulary name in the answer but not in the ledger, or a quoted
+  number not matching a ledger value after rounding, is a violation → one
+  correction retry → reject.
+- **Tests.** Tools against the test database; loop against the scripted fake;
+  guardrail with a planted made-up gene and a wrong number.
 
 ### CI
 
@@ -316,8 +408,9 @@ flowchart LR
 | Bedrock | AWS-hosted access to LLMs including Claude | Azure OpenAI Service |
 | IAM + OIDC | AWS permissions; GitHub gets short-lived AWS credentials, no stored keys | Managed identities |
 
-**The one microservice split.** The explain feature moves out of the API into
-an Insight service behind SQS. LLM calls are slow, costly, and sometimes fail;
+**The one microservice split.** The explain feature and the research agent
+move out of the API into an Insight service behind SQS (same agent loop; `/ask`
+returns a job ID). LLM calls are slow, costly, and sometimes fail;
 behind a queue they can't slow down or break the API, and the service scales
 on queue length rather than web traffic. Extracting a working feature from a
 running system is the strangler-fig pattern, the same move as a Node.js →
