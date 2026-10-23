@@ -3,7 +3,8 @@
 data/processed/<name>/{cells,expression}.parquet -> cells per perturbation
   -> gene sums per perturbation -> full grid of averages -> minus control averages -> top genes per perturbation
   -> Euclidean pair distances -> nearest perturbations
-  -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean}/
+  cells -> MD5 sample per perturbation
+  -> data/processed/<name>/spark/{perturbations,signatures,top_genes,euclidean,similar_euclidean,sampled_cells}/
 """
 
 import argparse
@@ -18,6 +19,7 @@ from pipeline.convert import COLUMNS, PROCESSED_DIR, log
 DRIVER_MEMORY = "8g"
 N_TOP = 50  # genes kept per perturbation
 N_SIMILAR = 20  # neighbors kept per perturbation
+N_SAMPLE = 100  # cells per perturbation for E-distance
 
 
 def session() -> SparkSession:
@@ -38,18 +40,38 @@ def session() -> SparkSession:
     return spark
 
 
-def perturbation_table(cells: DataFrame) -> DataFrame:
-    """List perturbations with target genes and cell counts; control excluded.
+def perturbation_table(cells: DataFrame, sampled: DataFrame) -> DataFrame:
+    """List perturbations with target genes, cell counts, sampled cell counts; control excluded.
 
-    In: cells (cell_id, perturbation, is_control, ...).
-    Out: plan for table (name, target_genes, cell_count).
+    In: cells (cell_id, perturbation, is_control, ...), sampled cells.
+    Out: plan for table (name, target_genes, cell_count, sampled_cell_count).
     """
+    sampled_counts = sampled.groupBy(F.col("perturbation").alias("name")).agg(
+        F.count("*").alias("sampled_cell_count")
+    )
     return (
         cells.where(~F.col("is_control"))
         .groupBy(F.col("perturbation").alias("name"))
         .agg(F.count("*").alias("cell_count"))
         .withColumn("target_genes", F.split("name", "_"))
-        .select("name", "target_genes", "cell_count")
+        .join(sampled_counts, "name")
+        .select("name", "target_genes", "cell_count", "sampled_cell_count")
+    )
+
+
+def sample_cells(cells: DataFrame) -> DataFrame:
+    """Pick up to N_SAMPLE cells per perturbation: lowest MD5 hex of UTF-8 cell_id first.
+
+    In: cells.
+    Out: plan for table (perturbation, cell_id, fingerprint).
+    """
+    first = Window.partitionBy("perturbation").orderBy("fingerprint", "cell_id")
+    return (
+        cells.where(~F.col("is_control"))
+        .withColumn("fingerprint", F.md5("cell_id"))  # same hex as hashlib.md5 on UTF-8
+        .withColumn("n", F.row_number().over(first))
+        .where(F.col("n") <= N_SAMPLE)
+        .select("perturbation", "cell_id", "fingerprint")
     )
 
 
@@ -155,12 +177,14 @@ def run(src: Path, out: Path, control: str, hold: bool = False) -> None:
 
     sig = signatures(cells, expression, control)
     pairs = euclidean(sig).cache()  # used 3 times: written, both sides of nearest's union
+    sampled = sample_cells(cells).cache()  # used twice: written, counted per perturbation
     tables = {
-        "perturbations": perturbation_table(cells),
+        "perturbations": perturbation_table(cells, sampled),
         "signatures": sig,
         "top_genes": top_genes(sig),
         "euclidean": pairs,
         "similar_euclidean": nearest(pairs),
+        "sampled_cells": sampled,
     }
     for table_name, table in tables.items():
         spark.sparkContext.setJobDescription(f"write {table_name}")

@@ -7,8 +7,8 @@ exploring large-scale single-cell perturbation data.
 The MVP shows one claim, end to end:
 
 > A single-machine analysis, migrated to PySpark, proven to give the same
-> answers, measured for where Spark and Scala pay off, and served through a
-> Python API with AI explanations.
+> answers, and served through a Python API with AI explanations and a research
+> agent.
 
 > Personal learning project. Not affiliated with or endorsed by DataXight.
 > Uses only public data.
@@ -23,10 +23,15 @@ The MVP shows one claim, end to end:
    and keeps each one's 20 closest matches.
 4. Proves the PySpark pipeline matches a single-machine reference
    implementation (parity test, run in CI).
-5. Benchmarks single machine vs Spark, and Python vs Scala for the heaviest
-   calculation.
+5. Computes the heaviest calculation, E-distance, in Spark three ways: plain
+   Python, pandas batches, and Scala.
 6. Serves results through FastAPI backed by MongoDB, with Claude explaining a
    signature in plain biological language.
+7. Answers open questions with a research agent: Claude picks what to look up
+   through read-only tools, code checks every name in the answer, and each
+   answer comes with its lookup trail.
+8. Shows it all on a one-page demo site: search a perturbation, see its top
+   genes and closest matches, ask for an explanation or ask a question.
 
 ## MVP architecture
 
@@ -40,7 +45,10 @@ flowchart LR
   SPK --> PAR
   SPK --> MDB[("MongoDB<br/>one record per perturbation")]
   MDB --> API["FastAPI"]
+  WEB["Demo page<br/>one HTML file"] --> API
   API --> CL["Claude<br/>explains a signature"]
+  API --> AG["Research agent<br/>Claude + read-only tools"]
+  AG --> MDB
   CI["GitHub Actions CI<br/>runs parity on every push"] -.-> PAR
 ```
 
@@ -69,4 +77,5 @@ Everything runs locally. AWS deployment follows the MVP.
 
 ## Status
 
-Phase 1 (Data → Parquet) in progress. Details: [docs/PROGRESS.md](docs/PROGRESS.md).
+Phase 4 (E-distance three ways) in progress. Details:
+[docs/PROGRESS.md](docs/PROGRESS.md).

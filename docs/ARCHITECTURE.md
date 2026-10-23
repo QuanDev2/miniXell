@@ -5,7 +5,8 @@ The MVP is a laptop-scale migration demo:
 - a **legacy reference**: single-machine Python, all data in memory;
 - the **new pipeline**: PySpark, work split across workers;
 - a **parity test** proving both give the same answers;
-- **benchmarks** showing where Spark and Scala pay off;
+- **E-distance three ways** in Spark (plain Python, pandas batches, Scala),
+  each checked against the reference;
 - an **API** serving results, with AI explanations;
 - a **research agent** answering open questions from those results.
 
@@ -139,15 +140,6 @@ Runs the legacy reference and the Spark job on the same input and requires:
 The tolerance exists because Spark adds numbers in a different order across
 workers, which changes the last digits. Cell sampling for E-distance uses one
 deterministic rule shared by both sides; otherwise parity can't hold.
-
-### Benchmarks
-
-- **Scale**: legacy vs Spark on 10%, 25%, 50%, 100% of a dataset. Records
-  wall time and peak memory; reports whichever limit appears first. On small
-  data the single machine may win, because Spark has fixed coordination
-  overhead.
-- **Three-way**: the three E-distance implementations on the same pairs,
-  parity-checked.
 
 ### MongoDB
 

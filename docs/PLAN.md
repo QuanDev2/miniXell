@@ -12,14 +12,14 @@ Each phase lists:
 
 ## MVP goal
 
-Five things to show:
+Four things to show:
 
 1. Parity test passing, plus a bug it caught.
-2. Scale chart: legacy vs Spark, time and peak memory.
-3. Three-way chart: E-distance as plain Python vs grouped pandas vs Scala.
-4. Live API call: a perturbation's similar perturbations and Claude's
+2. E-distance three ways in Spark (plain Python, pandas batches, Scala), each
+   parity-checked.
+3. Live API call: a perturbation's similar perturbations and Claude's
    explanation.
-5. Live agent question: an open question answered with the trail of lookups
+4. Live agent question: an open question answered with the trail of lookups
    behind it.
 
 ## Repo layout
@@ -35,7 +35,6 @@ miniXell/
 │   ├── spark_signatures.py  # PySpark job
 │   └── load_mongo.py        # results → MongoDB
 ├── scala/edistance/         # sbt project → jar loaded by PySpark
-├── benchmarks/              # scale + three-way scripts, results/
 ├── api/                     # FastAPI app; static/ = demo page (phase 6); agent/ = research assistant (phase 7)
 ├── tests/                   # unit, parity, API; fixtures/ = tiny dataset
 ├── docker-compose.yml       # local MongoDB
@@ -49,8 +48,7 @@ From scPerturb (Zenodo record 13350497).
 
 | Use | File | Size |
 |---|---|---|
-| Development, parity, three-way benchmark | `NormanWeissman2019_filtered.h5ad` | 666 MB |
-| Scale benchmark | `ReplogleWeissman2022_K562_essential.h5ad` | 1.5 GB |
+| Development and parity | `NormanWeissman2019_filtered.h5ad` | 666 MB |
 
 ---
 
@@ -77,7 +75,6 @@ From scPerturb (Zenodo record 13350497).
   then log); keep the 2,000 most variable genes; compute 50 principal
   components per cell; write `cells.parquet`, `expression.parquet` (non-zero
   values only), `cell_pcs.parquet`.
-- Same script handles the Replogle file for phase 4.
 
 **Learn along the way**
 - h5ad structure; sparse data (store only non-zeros).
@@ -130,26 +127,27 @@ From scPerturb (Zenodo record 13350497).
 
 **Interview line**: "Migrated the analysis to PySpark and proved equivalence with an automated parity test."
 
-## Phase 4: E-distance three ways + benchmarks (1–1.5 days)
+## Phase 4: E-distance three ways (1 day)
+
+Benchmarks dropped (user's call): no benchmark scripts, charts, or Replogle
+dataset. The job log's stage times are the only timings.
 
 **Build**
-- E-distance in Spark three ways: plain Python `udf`, grouped pandas
-  (`applyInPandas`), Scala function from `scala/edistance/` (sbt → jar,
-  loaded by PySpark).
-- All three parity-checked against the legacy answer key.
-- `benchmarks/edistance_3way.py`: same pairs, wall time per implementation.
-- `benchmarks/scale.py`: legacy vs Spark on 10/25/50/100% of the Replogle
-  dataset; wall time and peak memory; result charts in `benchmarks/results/`.
+- Spark sampling with the legacy MD5 rule: `sampled_cells`,
+  `sampled_cell_count`.
+- E-distance in Spark three ways: plain Python `udf`, pandas in batches,
+  Scala function from `scala/edistance/` (sbt → jar, loaded by PySpark);
+  writes `edistance`, `similar_edistance`.
+- All three parity-checked against the legacy answer key; parity tests extended.
 
 **Learn along the way**
 - Why data crossing between the Java runtime and Python costs time; batch
   (Arrow) vs row-by-row transfer.
 - Scala basics: syntax, types, sbt, jars.
-- How to benchmark honestly: warm-up runs, repeated runs, same input.
 
-**Done when**: both charts produced; all three implementations pass parity; results written up in `docs/notes/`, including where a single machine wins.
+**Done when**: all three implementations pass parity on the fixture and Norman; Spark output covers every MongoDB document field.
 
-**Interview line**: "Measured where distribution and Scala pay off instead of assuming it."
+**Interview line**: "Ported the heaviest calculation three ways, from Python to Scala, and proved each matches the reference."
 
 ## Phase 5: MongoDB + FastAPI + CI (1 day)
 
@@ -245,9 +243,8 @@ pathway-level analysis.
 ## If time runs short
 
 Cut in this order: phase 7 (agent; depends on phase 6) → phase 6 (explain
-becomes a whiteboard answer) → scale benchmark (keep three-way) → Scala
-implementation (keep plain Python vs grouped pandas). Phases 0–3 are the
-minimum credible demo.
+becomes a whiteboard answer) → Scala implementation (keep plain Python vs
+pandas batches). Phases 0–3 are the minimum credible demo.
 
 ## Alongside every phase
 

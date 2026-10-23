@@ -9,15 +9,16 @@ Last updated: 2026-10-22.
 ## Current position
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user).
-  Last commit: `70bb9bc` (step 3.6).
-- **Skipped:** Phase 4 (E-distance three ways + benchmarks), user's call.
-  Spark has no E-distance or `sampled_cell_count`; legacy has both.
-- **Uncommitted:** this file (3.6 hash, 3.7 skipped, Phase 3 closed,
-  Phase 4 skipped, Phase 7 added); PLAN.md and ARCHITECTURE.md (Phase 7
-  research assistant agent, demo page).
-- **Next:** Phase 5 (MongoDB + FastAPI + CI). Decide which outputs feed
-  MongoDB (legacy, Spark, or mixed), define steps, brief the user (commented
-  code snippets), wait for an explicit go per step.
+  Last commit: `961024e` (docs: Phase 7 agent, demo page).
+- **In progress:** Phase 4 (E-distance three ways), benchmarks dropped by
+  user. Step 4.1 done.
+- **Uncommitted:** step 4.1 (`pipeline/spark_signatures.py`, PLAN.md,
+  ARCHITECTURE.md, README.md, this file).
+- **Next:** step 4.2: pair table carrying both perturbations' sampled cells;
+  way 1 (plain Python `udf`) writes `edistance` + `similar_edistance`. Brief
+  the user (commented code snippets), wait for an explicit go.
+- **Phase 5 data source:** settled once Phase 4 is done: Spark covers every
+  MongoDB document field, so `load_mongo.py` reads `spark/` only.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -101,8 +102,21 @@ Each build step runs a throwaway comparison against `legacy/`.
 | 3.6 | `tests/fixtures/make_tiny.py` → `tests/fixtures/tiny/` (committed, 108 KB): 6 perturbations + control, 240 cells, 40 genes (5 targets + first 35 A–Z seen in kept cells), 1,723 expression rows, 110 zero-only (perturbation, gene) pairs. Both pipelines' `run(src, out, control)` take folders; CLIs unchanged. Test runs both pipelines on the fixture (session fixture, temp folder) and checks Norman if present: 10 passed (~20 s, needs Java: `uv run --env-file .env pytest`); without Norman outputs 5 passed, 5 skipped | Done | `70bb9bc` |
 | 3.7 | Deliberate bug (÷ rows present) caught by parity, reverted; write-up in `docs/notes/` | Skipped (user's call; PLAN "done when" bug demo not done) | — |
 
-`sampled_cell_count` and E-distance in Spark come in Phase 4. AI-assistant
-translation mistakes get logged in `docs/notes/` as they happen (PLAN.md).
+## Phase 4: E-distance three ways (in progress)
+
+Benchmarks dropped (user's call, 2026-10-22): no benchmark scripts, charts, or
+Replogle dataset. PLAN.md, ARCHITECTURE.md, README.md updated to match.
+
+| Step | What | Status | Commit |
+|---|---|---|---|
+| 4.1 | `sample_cells`: `F.md5(cell_id)` fingerprint, `row_number` per perturbation by (fingerprint, cell_id), keep ≤100; writes `sampled_cells` (23,290 rows); `perturbation_table` joins `sampled_cell_count`. Throwaway check vs legacy: same 23,290 (perturbation, cell_id) rows, fingerprints identical, no duplicates; `sampled_cell_count` equal for all 236, 12 below 100 (min 54). Parity suite: 10 passed (30 s). Full Norman job 77 s this run vs ~29 s in step 3.4; untouched stages were slower too (likely machine load, not checked) | Done | uncommitted |
+| 4.2 | Pair table + way 1 (plain Python `udf`) → `edistance`, `similar_edistance` | Next | — |
+| 4.3 | Way 2: pandas in batches | Pending | — |
+| 4.4 | Way 3: Scala `scala/edistance/` → jar → PySpark | Pending | — |
+| 4.5 | Parity tests: sampling, E-distance, similar lists; fixture + Norman | Pending | — |
+
+AI-assistant translation mistakes get logged in `docs/notes/` as they happen
+(PLAN.md).
 
 ## Environment (this machine)
 
