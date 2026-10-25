@@ -10,12 +10,11 @@ Last updated: 2026-10-25.
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user),
   Phase 4 (benchmarks dropped, Scala way 4.4 skipped for now by user).
-  Last commit: `7b43c48` (step 4.5).
-- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.1 done,
-  uncommitted (`pipeline/load_mongo.py`, `pyproject.toml`, `uv.lock`, this
-  file).
-- **Next:** step 5.2 (API skeleton). Brief the user high level, wait for an
-  explicit go.
+  Last commit: `2e31555` (step 5.1).
+- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.2 done,
+  uncommitted (`api/`, `pyproject.toml`, `uv.lock`, this file).
+- **Next:** step 5.3 (list-by-gene and similar endpoints). Brief the user
+  high level, wait for an explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -125,20 +124,26 @@ Data source: Spark output only (`data/processed/norman/spark/`).
 Load: `uv run --env-file .env python -m pipeline.load_mongo norman` (~6 s
 per run, mostly imports; load itself < 1 s). Database `minixell`, collection
 `perturbations`.
+API: `uv run --env-file .env uvicorn api.main:app` → `http://127.0.0.1:8000`,
+docs page at `/docs`. Env: `MONGODB_URI` (required), `MONGODB_DB` (default
+`minixell`).
 
 | Step | What | Status | Commit |
 |---|---|---|---|
-| 5.1 | `pipeline/load_mongo.py`: `load_tables` (pandas reads `perturbations`, `top_genes`, `similar_euclidean`, `similar_edistance`) → `build_documents` (236 docs per ARCHITECTURE.md schema, lists in rank order, `dataset` = `NormanWeissman2019`) → `ensure_indexes` (unique `{dataset, name}`, multikey `{top_genes.gene}`) → `write_documents` (delete dataset's docs, `insert_many`). Ran twice: 0 then 236 replaced, 236 total (no duplicates). Throwaway checks: every doc 50 top genes + 20 + 20 similar; 0 docs list themselves as similar; KLF1 matches Parquet exactly (targets, counts, all 90 list entries); doc size 3.9–4.2 KB; `explain()`: by name → IXSCAN `dataset_1_name_1` (1 examined, 1 returned), by gene HBZ → IXSCAN `top_genes.gene_1` (206 examined, 206 returned) | Done | uncommitted |
-| 5.2 | API skeleton: FastAPI, pymongo async client, `api/repository.py`, Pydantic models, `GET /health`, `GET /perturbations/{name}` | Next | — |
+| 5.1 | `pipeline/load_mongo.py`: `load_tables` (pandas reads `perturbations`, `top_genes`, `similar_euclidean`, `similar_edistance`) → `build_documents` (236 docs per ARCHITECTURE.md schema, lists in rank order, `dataset` = `NormanWeissman2019`) → `ensure_indexes` (unique `{dataset, name}`, multikey `{top_genes.gene}`) → `write_documents` (delete dataset's docs, `insert_many`). Ran twice: 0 then 236 replaced, 236 total (no duplicates). Throwaway checks: every doc 50 top genes + 20 + 20 similar; 0 docs list themselves as similar; KLF1 matches Parquet exactly (targets, counts, all 90 list entries); doc size 3.9–4.2 KB; `explain()`: by name → IXSCAN `dataset_1_name_1` (1 examined, 1 returned), by gene HBZ → IXSCAN `top_genes.gene_1` (206 examined, 206 returned) | Done | `2e31555` |
+| 5.2 | `api/main.py`: FastAPI app; `lifespan` opens one `AsyncMongoClient` (2 s server timeout) and stores a `PerturbationRepository` on `app.state`; `get_repository` dependency hands it to routes. `api/repository.py`: `PerturbationRepository(db, dataset)` with `ping()` and `get(name)` (find by `{dataset, name}`, `_id` dropped, returns dict). `api/models.py`: Pydantic `Health`, `TopGene`, `Neighbor`, `Similar`, `Perturbation`. Endpoints: `GET /health` (200 `{"status":"ok"}`; 503 when MongoDB unreachable), `GET /perturbations/{name}` (404 if unknown). Smoke run: `/health` 200; KLF1 → 50 top genes (HBZ first) + 20 + 20 similar (KLF1_BAK1 first); KLF1_BAK1 200; NOPE 404; `/docs` 200, lists both paths; server pointed at a dead port → `/health` 503 in 2.0 s | Done | uncommitted |
 | 5.3 | `GET /perturbations?gene=&limit=`, `GET /perturbations/{name}/similar?metric=`; confirm index use with `explain()` | Pending | — |
 | 5.4 | API tests against a separate test database loaded from the tiny fixture | Pending | — |
 | 5.5 | `.github/workflows/ci.yml`: lint, unit, API, parity on fixture (Java 17 + MongoDB service); green on GitHub. Blocker: no GitHub repo; ask user to create one or approve `gh repo create` + push | Pending | — |
 
-Docstring review (uncommitted): `pipeline/load_mongo.py` now uses Google-style
+Docstring review (in `2e31555`): `pipeline/load_mongo.py` now uses Google-style
 docstrings describing record contents, argument meaning, rank ordering, and
 the non-atomic replacement risk. Syntax compilation passed; executable syntax
 and the CLI description match the pre-edit version. No loader execution or
-database writes during this review. Next step remains 5.2 (API skeleton).
+database writes during this review. `api/` uses Google style too (step 5.2).
+Older files (`pipeline/convert.py`, `download.py`, `legacy_signatures.py`,
+`spark_signatures.py`, `tests/`) still use `In:`/`Out:`/`State:`; not
+restyled.
 
 ## Environment (this machine)
 
@@ -149,6 +154,7 @@ database writes during this review. Next step remains 5.2 (API skeleton).
 - pytest 9.1.1 as a uv dev dependency (`uv add --dev pytest`, step 3.5).
 - pymongo 4.19.0 (`uv add pymongo`, step 5.1); the API uses its async
   client (Motor is deprecated).
+- fastapi 0.162.0, uvicorn 0.54.0 (`uv add fastapi uvicorn`, step 5.2).
 - Java is scoped to the project: run project commands as
   `uv run --env-file .env <command>`. Plain `uv run` is fine for pure Python
   that doesn't start Spark or sbt.
@@ -267,3 +273,6 @@ Details that matter for correctness:
   step; answer briefly and at the level asked.
 - Pre-implementation briefs: high level only (function names and what they
   do), with .NET analogies. No detailed code unless the user asks.
+- Docstrings: Google style (`Args:` / `Returns:` / `Yields:` / `Raises:` /
+  `Warning:`) for all new or edited code; `In:`/`Out:`/`State:` is retired
+  (user's call, 2026-10-25). Rule lives in the global AGENTS.md.
