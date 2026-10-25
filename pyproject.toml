@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "anndata>=0.13.4",
     "pyarrow>=26.0.0",
+    "pymongo>=4.19.0",
     "pyspark>=4.2.0",
     "scanpy>=1.12.4",
 ]

@@ -4,19 +4,18 @@ Handoff log: where the build stands, what's done, what's next. Updated after
 every step. Phases are defined in [PLAN.md](PLAN.md); steps within a phase are
 defined here.
 
-Last updated: 2026-10-22.
+Last updated: 2026-10-25.
 
 ## Current position
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user),
   Phase 4 (benchmarks dropped, Scala way 4.4 skipped for now by user).
-  Last commit: `2be5139` (step 4.3).
-- **Uncommitted:** step 4.5 (`tests/test_parity.py`, PLAN.md,
-  ARCHITECTURE.md, README.md, CONCEPTS.md, this file).
-- **Next:** Phase 5 (MongoDB + FastAPI + CI). Data source settled: Spark
-  covers every document field, so `load_mongo.py` reads `spark/` only. Define
-  steps, brief the user high level (function names and what they do), wait
-  for an explicit go per step.
+  Last commit: `7b43c48` (step 4.5).
+- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.1 done,
+  uncommitted (`pipeline/load_mongo.py`, `pyproject.toml`, `uv.lock`, this
+  file).
+- **Next:** step 5.2 (API skeleton). Brief the user high level, wait for an
+  explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -115,10 +114,31 @@ PySpark"); docs say "two ways, Scala deferred".
 | 4.2 | `cell_groups` (sampled cells' 50 PCs as float64, `collect_list` per perturbation, 236 rows) → `cell_pairs` (a < b, small side repartitioned to 40 chunks then broadcast-joined, 27,730 rows carrying both cell lists) → `edistance(groups, fn)` = 2 × between − spread a − spread b, `fn` = `mean_distance_udf` (plain `udf`, `useArrow=False`, numpy inside; same expression as legacy `mean_distance`); `nearest` reused. Writes `edistance` (27,730), `similar_edistance` (4,720). Throwaway check vs legacy: no one-sided/duplicate rows, max gap 1.4e-14, 0 negative (min 0.1105), neighbor lists identical (max gap 8.9e-15). E-distance stage ~42 s (legacy 11.7 s); full job 125 s. Parity suite: 10 passed (35 s) | Done | `beef5a1` |
 | 4.3 | `mean_distance` (shared numpy math) used by `mean_distance_udf` and new `mean_distance_pandas` (`pandas_udf`, Series → Series, `np.stack` per row); `EDISTANCE_FNS` + `--edistance udf\|pandas` (default `udf`); `run(..., way=)`; `spark.sql.execution.arrow.maxRecordsPerBatch` = 500 (~40 MB per batch). Norman `--edistance pandas` vs legacy: max gap 1.4e-14, neighbor lists identical (same as udf). E-distance stage ~31 s vs ~42 s for udf (single runs, not a benchmark). Fixture throwaway with pandas way: 15 pairs, max gap 3.6e-15, but the stage took ~22 s for 15 rows (40 pair chunks → Python worker startup per task). Parity suite (udf default): 10 passed (41 s). pandas ≥ 3.0 warning printed, no failure | Done | `2be5139` |
 | 4.4 | Way 3: Scala `scala/edistance/` → jar → PySpark | Skipped for now (user's call: "go with PySpark") | — |
-| 4.5 | `tests/test_parity.py`: `test_perturbations` also checks `sampled_cell_count`; new `test_sampled_cells` (same rows, identical fingerprints), `test_edistance` (≤1e-9), `test_similar_edistance` (identical neighbors, ≤1e-9), each on fixture + Norman; `test_edistance_pandas_way` runs the pandas way on the fixture into a temp folder and checks against the fixture's legacy output (main fixture run uses udf, so both ways covered). Run: `uv run --env-file .env pytest tests/test_parity.py` → 17 passed in 107 s (was 10 in ~35 s; pandas-way fixture run adds most). Tamper check on Norman: +1e-6 on one E-distance and one sampled cell dropped → 2 failed; restored → 8 Norman tests passed. Docs: "three ways" → two, Scala deferred, Scala cut-order and post-MVP jar mentions removed (PLAN, ARCHITECTURE, README, CONCEPTS) | Done | uncommitted |
+| 4.5 | `tests/test_parity.py`: `test_perturbations` also checks `sampled_cell_count`; new `test_sampled_cells` (same rows, identical fingerprints), `test_edistance` (≤1e-9), `test_similar_edistance` (identical neighbors, ≤1e-9), each on fixture + Norman; `test_edistance_pandas_way` runs the pandas way on the fixture into a temp folder and checks against the fixture's legacy output (main fixture run uses udf, so both ways covered). Run: `uv run --env-file .env pytest tests/test_parity.py` → 17 passed in 107 s (was 10 in ~35 s; pandas-way fixture run adds most). Tamper check on Norman: +1e-6 on one E-distance and one sampled cell dropped → 2 failed; restored → 8 Norman tests passed. Docs: "three ways" → two, Scala deferred, Scala cut-order and post-MVP jar mentions removed (PLAN, ARCHITECTURE, README, CONCEPTS) | Done | `7b43c48` |
 
 AI-assistant translation mistakes get logged in `docs/notes/` as they happen
 (PLAN.md).
+
+## Phase 5: MongoDB + FastAPI + CI (in progress)
+
+Data source: Spark output only (`data/processed/norman/spark/`).
+Load: `uv run --env-file .env python -m pipeline.load_mongo norman` (~6 s
+per run, mostly imports; load itself < 1 s). Database `minixell`, collection
+`perturbations`.
+
+| Step | What | Status | Commit |
+|---|---|---|---|
+| 5.1 | `pipeline/load_mongo.py`: `load_tables` (pandas reads `perturbations`, `top_genes`, `similar_euclidean`, `similar_edistance`) → `build_documents` (236 docs per ARCHITECTURE.md schema, lists in rank order, `dataset` = `NormanWeissman2019`) → `ensure_indexes` (unique `{dataset, name}`, multikey `{top_genes.gene}`) → `write_documents` (delete dataset's docs, `insert_many`). Ran twice: 0 then 236 replaced, 236 total (no duplicates). Throwaway checks: every doc 50 top genes + 20 + 20 similar; 0 docs list themselves as similar; KLF1 matches Parquet exactly (targets, counts, all 90 list entries); doc size 3.9–4.2 KB; `explain()`: by name → IXSCAN `dataset_1_name_1` (1 examined, 1 returned), by gene HBZ → IXSCAN `top_genes.gene_1` (206 examined, 206 returned) | Done | uncommitted |
+| 5.2 | API skeleton: FastAPI, pymongo async client, `api/repository.py`, Pydantic models, `GET /health`, `GET /perturbations/{name}` | Next | — |
+| 5.3 | `GET /perturbations?gene=&limit=`, `GET /perturbations/{name}/similar?metric=`; confirm index use with `explain()` | Pending | — |
+| 5.4 | API tests against a separate test database loaded from the tiny fixture | Pending | — |
+| 5.5 | `.github/workflows/ci.yml`: lint, unit, API, parity on fixture (Java 17 + MongoDB service); green on GitHub. Blocker: no GitHub repo; ask user to create one or approve `gh repo create` + push | Pending | — |
+
+Docstring review (uncommitted): `pipeline/load_mongo.py` now uses Google-style
+docstrings describing record contents, argument meaning, rank ordering, and
+the non-atomic replacement risk. Syntax compilation passed; executable syntax
+and the CLI description match the pre-edit version. No loader execution or
+database writes during this review. Next step remains 5.2 (API skeleton).
 
 ## Environment (this machine)
 
@@ -127,6 +147,8 @@ AI-assistant translation mistakes get logged in `docs/notes/` as they happen
   openjdk 27 also installed as sbt's Homebrew dependency; unused.
 - Python 3.12.15 via uv (`.python-version`); system Python 3.14 untouched.
 - pytest 9.1.1 as a uv dev dependency (`uv add --dev pytest`, step 3.5).
+- pymongo 4.19.0 (`uv add pymongo`, step 5.1); the API uses its async
+  client (Motor is deprecated).
 - Java is scoped to the project: run project commands as
   `uv run --env-file .env <command>`. Plain `uv run` is fine for pure Python
   that doesn't start Spark or sbt.
@@ -136,6 +158,7 @@ AI-assistant translation mistakes get logged in `docs/notes/` as they happen
   - `SPARK_LOCAL_IP=127.0.0.1`
 - MongoDB: `docker compose up -d`; container `minixell-mongo`, MongoDB
   8.3.13, `127.0.0.1:27017`, volume `minixell_mongo-data`.
+  Database `minixell` (step 5.1).
 - Spark: PySpark 4.2.0 bundles the engine (277 jars, built for Scala 2.13);
   `local[*]` = 10 workers.
 - Data: `data/raw/NormanWeissman2019_filtered.h5ad` (git-ignored). Re-fetch
@@ -242,6 +265,5 @@ Details that matter for correctness:
 - The user is a .NET/Angular developer learning this stack for a DataXight
   interview; .NET analogies land well. Expect conceptual questions before each
   step; answer briefly and at the level asked.
-- Pre-implementation briefs: show the code to be written as snippets with
-  comments explaining each block or non-obvious line, plus a .NET analogy
-  where it helps. The user asked for this format explicitly.
+- Pre-implementation briefs: high level only (function names and what they
+  do), with .NET analogies. No detailed code unless the user asks.
