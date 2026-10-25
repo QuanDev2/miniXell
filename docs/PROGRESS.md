@@ -10,11 +10,11 @@ Last updated: 2026-10-25.
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user),
   Phase 4 (benchmarks dropped, Scala way 4.4 skipped for now by user).
-  Last commit: `2e31555` (step 5.1).
-- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.2 done,
-  uncommitted (`api/`, `pyproject.toml`, `uv.lock`, this file).
-- **Next:** step 5.3 (list-by-gene and similar endpoints). Brief the user
-  high level, wait for an explicit go.
+  Last commit: `b7794c8` (step 5.2).
+- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.3 done,
+  uncommitted (`api/`, this file).
+- **Next:** step 5.4 (API tests against a test database loaded from the tiny
+  fixture). Brief the user high level, wait for an explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -131,8 +131,8 @@ docs page at `/docs`. Env: `MONGODB_URI` (required), `MONGODB_DB` (default
 | Step | What | Status | Commit |
 |---|---|---|---|
 | 5.1 | `pipeline/load_mongo.py`: `load_tables` (pandas reads `perturbations`, `top_genes`, `similar_euclidean`, `similar_edistance`) → `build_documents` (236 docs per ARCHITECTURE.md schema, lists in rank order, `dataset` = `NormanWeissman2019`) → `ensure_indexes` (unique `{dataset, name}`, multikey `{top_genes.gene}`) → `write_documents` (delete dataset's docs, `insert_many`). Ran twice: 0 then 236 replaced, 236 total (no duplicates). Throwaway checks: every doc 50 top genes + 20 + 20 similar; 0 docs list themselves as similar; KLF1 matches Parquet exactly (targets, counts, all 90 list entries); doc size 3.9–4.2 KB; `explain()`: by name → IXSCAN `dataset_1_name_1` (1 examined, 1 returned), by gene HBZ → IXSCAN `top_genes.gene_1` (206 examined, 206 returned) | Done | `2e31555` |
-| 5.2 | `api/main.py`: FastAPI app; `lifespan` opens one `AsyncMongoClient` (2 s server timeout) and stores a `PerturbationRepository` on `app.state`; `get_repository` dependency hands it to routes. `api/repository.py`: `PerturbationRepository(db, dataset)` with `ping()` and `get(name)` (find by `{dataset, name}`, `_id` dropped, returns dict). `api/models.py`: Pydantic `Health`, `TopGene`, `Neighbor`, `Similar`, `Perturbation`. Endpoints: `GET /health` (200 `{"status":"ok"}`; 503 when MongoDB unreachable), `GET /perturbations/{name}` (404 if unknown). Smoke run: `/health` 200; KLF1 → 50 top genes (HBZ first) + 20 + 20 similar (KLF1_BAK1 first); KLF1_BAK1 200; NOPE 404; `/docs` 200, lists both paths; server pointed at a dead port → `/health` 503 in 2.0 s | Done | uncommitted |
-| 5.3 | `GET /perturbations?gene=&limit=`, `GET /perturbations/{name}/similar?metric=`; confirm index use with `explain()` | Pending | — |
+| 5.2 | `api/main.py`: FastAPI app; `lifespan` opens one `AsyncMongoClient` (2 s server timeout) and stores a `PerturbationRepository` on `app.state`; `get_repository` dependency hands it to routes. `api/repository.py`: `PerturbationRepository(db, dataset)` with `ping()` and `get(name)` (find by `{dataset, name}`, `_id` dropped, returns dict). `api/models.py`: Pydantic `Health`, `TopGene`, `Neighbor`, `Similar`, `Perturbation`. Endpoints: `GET /health` (200 `{"status":"ok"}`; 503 when MongoDB unreachable), `GET /perturbations/{name}` (404 if unknown). Smoke run: `/health` 200; KLF1 → 50 top genes (HBZ first) + 20 + 20 similar (KLF1_BAK1 first); KLF1_BAK1 200; NOPE 404; `/docs` 200, lists both paths; server pointed at a dead port → `/health` 503 in 2.0 s | Done | `b7794c8` |
+| 5.3 | `api/repository.py`: `search(gene, limit)` (find by dataset [+ `top_genes.gene`], sort name, limit; positional projection `top_genes.$` returns only the matched gene → `gene_change`) and `similar(name, metric)` (projects only `similar.<metric>`; None if unknown). `api/models.py`: `Metric` (`Literal["euclidean", "edistance"]`), `PerturbationSummary`, `SimilarResponse`. `api/main.py`: `GET /perturbations?gene=&limit=` (default 50, 1–236 via `MAX_LIMIT`), `GET /perturbations/{name}/similar?metric=` (default `edistance`). Choices: list sorted by name; exact gene match (`hbz` → 0 results). Smoke run: no gene → 50, sorted; limit=236 → 236; gene=HBZ → 206, KLF1 change 1.416903; limit 0 / 237 and metric=foo → 422; NOPE similar → 404; KLF1 similar → 20, KLF1_BAK1 first (edistance 0.131292, euclidean 0.794458); `/openapi.json` lists 4 paths. `explain()`: list all → IXSCAN `dataset_1_name_1`, covered (0 docs examined); similar → IXSCAN `dataset_1_name_1` (1 examined). Gene search: planner picks per gene; across all 388 top genes, 359 use `top_genes.gene_1` (AHR: 1 examined, 1 returned), 29 very common genes (in > 50 docs, e.g. HBZ in 206) use `dataset_1_name_1` to skip the sort (236 examined). Never a full collection scan; no index change | Done | uncommitted |
 | 5.4 | API tests against a separate test database loaded from the tiny fixture | Pending | — |
 | 5.5 | `.github/workflows/ci.yml`: lint, unit, API, parity on fixture (Java 17 + MongoDB service); green on GitHub. Blocker: no GitHub repo; ask user to create one or approve `gh repo create` + push | Pending | — |
 

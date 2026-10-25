@@ -1,6 +1,10 @@
 """Response shapes for the API; mirror the `perturbations` document schema in ARCHITECTURE.md."""
 
+from typing import Literal
+
 from pydantic import BaseModel
+
+Metric = Literal["euclidean", "edistance"]  # keys of each document's `similar` object
 
 
 class Health(BaseModel):
@@ -30,3 +34,16 @@ class Perturbation(BaseModel):
     sampled_cell_count: int
     top_genes: list[TopGene]  # largest absolute change first
     similar: Similar
+
+
+class PerturbationSummary(BaseModel):
+    name: str
+    target_genes: list[str]
+    cell_count: int
+    gene_change: float | None = None  # searched gene's change; None when no gene filter
+
+
+class SimilarResponse(BaseModel):
+    name: str
+    metric: Metric
+    neighbors: list[Neighbor]  # closest first

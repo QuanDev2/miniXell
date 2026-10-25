@@ -13,15 +13,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pymongo import AsyncMongoClient
 
-from api.models import Health, Perturbation
+from api.models import Health, Metric, Perturbation, PerturbationSummary, SimilarResponse
 from api.repository import PerturbationRepository
 
 DEFAULT_DB = "minixell"  # same database pipeline/load_mongo.py writes
 DATASET = "NormanWeissman2019"
 SERVER_TIMEOUT_MS = 2_000  # fail fast when MongoDB is down
+MAX_LIMIT = 236  # perturbations in the Norman dataset
 
 
 @asynccontextmanager
@@ -80,6 +81,25 @@ async def health(repository: Repository) -> Health:
     return Health(status="ok")
 
 
+@app.get("/perturbations")
+async def list_perturbations(
+    repository: Repository,
+    gene: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = 50,
+) -> list[PerturbationSummary]:
+    """List perturbations, optionally only those where a gene is among the top 50 changed genes.
+
+    Args:
+        repository: Shared query layer injected by get_repository.
+        gene: Exact gene symbol, such as HBZ; omit to list every perturbation.
+        limit: Maximum number of results, 1 to MAX_LIMIT.
+
+    Returns:
+        Summaries sorted by name. With a gene, each includes that gene's change.
+    """
+    return [PerturbationSummary(**doc) for doc in await repository.search(gene, limit)]
+
+
 @app.get("/perturbations/{name}", response_model=Perturbation)
 async def get_perturbation(name: str, repository: Repository) -> dict:
     """Return one perturbation's stored summary.
@@ -99,3 +119,25 @@ async def get_perturbation(name: str, repository: Repository) -> dict:
     if doc is None:
         raise HTTPException(status_code=404, detail=f"perturbation {name!r} not found")
     return doc
+
+
+@app.get("/perturbations/{name}/similar")
+async def get_similar(name: str, repository: Repository, metric: Metric = "edistance") -> SimilarResponse:
+    """Return one perturbation's 20 closest matches by one metric.
+
+    Args:
+        name: Published perturbation label, such as KLF1.
+        repository: Shared query layer injected by get_repository.
+        metric: Distance measure: edistance (cell-level, default) or euclidean
+            (average-profile).
+
+    Returns:
+        Neighbors closest first.
+
+    Raises:
+        HTTPException: 404 when the dataset has no perturbation with this name.
+    """
+    neighbors = await repository.similar(name, metric)
+    if neighbors is None:
+        raise HTTPException(status_code=404, detail=f"perturbation {name!r} not found")
+    return SimilarResponse(name=name, metric=metric, neighbors=neighbors)

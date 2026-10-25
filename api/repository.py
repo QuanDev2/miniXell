@@ -50,3 +50,43 @@ class PerturbationRepository:
             no perturbation with this name.
         """
         return await self.collection.find_one({"dataset": self.dataset, "name": name}, {"_id": 0})
+
+    async def search(self, gene: str | None, limit: int) -> list[dict]:
+        """List perturbation summaries, optionally only those where a gene is a top gene.
+
+        Args:
+            gene: Exact gene symbol, such as HBZ, to match against each
+                document's top genes; None lists every perturbation.
+            limit: Maximum number of summaries to return.
+
+        Returns:
+            Summaries sorted by name with name, target_genes, and cell_count.
+            With a gene, each also has gene_change, that gene's change in the
+            perturbation.
+        """
+        query = {"dataset": self.dataset}
+        projection = {"_id": 0, "name": 1, "target_genes": 1, "cell_count": 1}
+        if gene is not None:
+            query["top_genes.gene"] = gene
+            projection["top_genes.$"] = 1  # only the matched array element
+        docs = await self.collection.find(query, projection).sort("name", 1).limit(limit).to_list()
+        for doc in docs:
+            if matched := doc.pop("top_genes", None):
+                doc["gene_change"] = matched[0]["change"]
+        return docs
+
+    async def similar(self, name: str, metric: str) -> list[dict] | None:
+        """Fetch one perturbation's closest matches by one metric.
+
+        Args:
+            name: Published perturbation label, such as KLF1.
+            metric: Key of the document's similar object: euclidean or edistance.
+
+        Returns:
+            Neighbors as {name, distance}, closest first, or None if the dataset
+            has no perturbation with this name.
+        """
+        doc = await self.collection.find_one(
+            {"dataset": self.dataset, "name": name}, {"_id": 0, f"similar.{metric}": 1}
+        )
+        return None if doc is None else doc["similar"][metric]
