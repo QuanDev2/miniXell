@@ -167,6 +167,104 @@ dataset. The job log's stage times are the only timings. Scala way deferred
 
 **Interview line**: "Python backend with typed contracts, tested in CI, with parity as a merge gate."
 
+## Step 5.4 contract: API integration tests
+
+**Revision:** 2.
+**Status:** APPROVED; execution pending separate explicit authorization.
+**User approval:** "save it", in response to "Mark contract APPROVED,
+execution still pending?" This approves the contract, not implementation.
+Saving this contract does not dispatch the implementer.
+
+**Goal**
+
+Add automated tests against the real API and a throwaway MongoDB database
+filled from the tiny test dataset. Check every existing endpoint on each run,
+so CI in step 5.5 can block broken changes.
+
+**Design**
+
+- Exercise the real application lifespan, routes, repository, and MongoDB.
+  A test client sends requests in-process; no repository or database mocks.
+- Reuse the tiny fixture's Spark outputs and the existing loader.
+  Compare responses against source Parquet, not loader-produced documents.
+  Numeric tolerance: `1e-9`.
+- Preserve existing application behavior and parity coverage. Settled schema
+  and endpoint design remain in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+**Scope and safety**
+
+- Generate a unique disposable database per test session and configure the
+  application before startup. Cleanup only that generated database, including
+  setup or test failures. Never invoke the loader CLI targeting the main
+  `minixell` database.
+- Missing MongoDB or Java must produce a clear setup failure, not skipped API
+  checks. Existing optional Norman parity skips remain unchanged.
+- Include another dataset's distinguishable records in the disposable
+  database; queries must remain dataset-scoped.
+
+**Allowed changes**
+
+| Where | File | Change | Why |
+|---|---|---|---|
+| Tests | tests/test_api.py | **New:** endpoint integration tests. | Verify serving behavior. |
+| Tests | tests/conftest.py, tests/test_parity.py | Share tiny fixture setup without removing parity checks. | Avoid duplicate pipeline runs. |
+| Dependencies | pyproject.toml, uv.lock | Add dev dependency `httpx`. | Support test client. |
+| Documentation | docs/PLAN.md, docs/PROGRESS.md | Keep contract in plan; execution evidence and contract link in progress. | Keep handoff responsibilities separate. |
+
+**Acceptance criteria**
+
+Verify actual values and ordering, not merely successful status codes.
+The tiny fixture has six perturbations and five neighbors each.
+
+| Endpoint | Acceptance |
+|---|---|
+| `/health` | Connected database returns 200 with `{"status":"ok"}`; unreachable database returns 503 without stopping shared MongoDB. |
+| `/perturbations/{name}` | Correct metadata, ranked genes, and both neighbor lists; no `_id`. Cover single-target and combination records. Unknown name returns 404. |
+| `/perturbations` | Exact fixture records, sorted by name; a smaller limit returns the correct prefix. Unfiltered `gene_change` is null. |
+| `/perturbations?gene=…` | Exact matching records and correct changes. Unknown or wrong-case symbol returns an empty list. |
+| Limit validation | 1 and 236 are accepted; zero, negative, above 236, and non-integer values return 422. |
+| `/perturbations/{name}/similar` | Correct neighbors, distances, and ordering for both metrics; default selects E-distance; no self-match. Unknown name returns 404; invalid metric returns 422. |
+
+Both consecutive API test runs must pass without stale records or database-name
+collisions. The demo database must remain untouched.
+
+**Verification**
+
+With existing MongoDB available:
+
+```bash
+uv run --env-file .env pytest tests/test_api.py -v
+uv run --env-file .env pytest tests/test_api.py -v
+uv run --env-file .env pytest -v
+```
+
+Expected: both API runs pass and the full suite has no regressions. Record
+actual counts and existing optional Norman skips.
+
+Separate live smoke: prepare a temporary database from the tiny fixture's
+Spark outputs, launch Uvicorn against it, and send real HTTP requests covering
+health, list/filter, detail, both similarity metrics, and error responses.
+Record exact commands and results. Stop the server, close clients, drop only
+the disposable database, and remove the temporary harness.
+
+**Exclusions**
+
+No application or pipeline changes, CI workflow, service startup or install,
+commits, pushes, or adjacent cleanup. Uvicorn startup for the specified live
+smoke is in scope once execution is authorized; starting shared MongoDB is not.
+If an application bug blocks acceptance, report evidence and request a scope
+amendment rather than changing application code under this contract.
+
+**Handoff and completion**
+
+After explicit execution approval, the implementer records IN PROGRESS in
+[PROGRESS.md](PROGRESS.md) and owns that execution log until READY FOR REVIEW.
+Record work completed, commands, actual results, cleanup evidence, commit hash
+or "uncommitted", blockers, next step, and a link to this contract there.
+Finish READY FOR REVIEW; user acceptance closes the step. Do not start step 5.5.
+
+**Unresolved questions:** None.
+
 ## Phase 6: Claude explain endpoint + demo page (1–1.5 days)
 
 **Build**

@@ -10,27 +10,13 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from pipeline import legacy_signatures, spark_signatures
+from pipeline import spark_signatures
 
 FIXTURE = Path(__file__).parent / "fixtures/tiny"
 NORMAN = Path(__file__).parents[1] / "data/processed/norman"
 CONTROL = "control"
 TOL = 1e-9  # max absolute gap; Spark adds in a different order
 TOP_RANKS = 10  # gene ranks that must match exactly
-
-
-@pytest.fixture(scope="session")
-def tiny(tmp_path_factory) -> Path:
-    """Run both pipelines on the committed fixture.
-
-    In: pytest temp folder factory.
-    Out: folder holding legacy/ and spark/ outputs.
-    State: starts and stops Spark once per test session.
-    """
-    out = tmp_path_factory.mktemp("tiny")
-    legacy_signatures.run(FIXTURE, out / "legacy", CONTROL)
-    spark_signatures.run(FIXTURE, out / "spark", CONTROL)
-    return out
 
 
 @pytest.fixture(params=["tiny", "norman"])

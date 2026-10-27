@@ -4,17 +4,18 @@ Handoff log: where the build stands, what's done, what's next. Updated after
 every step. Phases are defined in [PLAN.md](PLAN.md); steps within a phase are
 defined here.
 
-Last updated: 2026-10-25.
+Last updated: 2026-10-26.
 
 ## Current position
 
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user),
   Phase 4 (benchmarks dropped, Scala way 4.4 skipped for now by user).
-  Last commit: `b7794c8` (step 5.2).
-- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.3 done,
-  uncommitted (`api/`, this file).
-- **Next:** step 5.4 (API tests against a test database loaded from the tiny
-  fixture). Brief the user high level, wait for an explicit go.
+  Last commit: `bb240d4` (step 5.3).
+- **In progress:** Phase 5 (MongoDB + FastAPI + CI). Step 5.4 done, accepted
+  by user 2026-10-26 ("commit"), per the
+  [step 5.4 contract](PLAN.md#step-54-contract-api-integration-tests).
+- **Next:** step 5.5 (CI workflow). Blocker: no GitHub repo; ask the user to
+  create one or approve `gh repo create` + push. Brief, wait for an explicit go.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -132,8 +133,8 @@ docs page at `/docs`. Env: `MONGODB_URI` (required), `MONGODB_DB` (default
 |---|---|---|---|
 | 5.1 | `pipeline/load_mongo.py`: `load_tables` (pandas reads `perturbations`, `top_genes`, `similar_euclidean`, `similar_edistance`) → `build_documents` (236 docs per ARCHITECTURE.md schema, lists in rank order, `dataset` = `NormanWeissman2019`) → `ensure_indexes` (unique `{dataset, name}`, multikey `{top_genes.gene}`) → `write_documents` (delete dataset's docs, `insert_many`). Ran twice: 0 then 236 replaced, 236 total (no duplicates). Throwaway checks: every doc 50 top genes + 20 + 20 similar; 0 docs list themselves as similar; KLF1 matches Parquet exactly (targets, counts, all 90 list entries); doc size 3.9–4.2 KB; `explain()`: by name → IXSCAN `dataset_1_name_1` (1 examined, 1 returned), by gene HBZ → IXSCAN `top_genes.gene_1` (206 examined, 206 returned) | Done | `2e31555` |
 | 5.2 | `api/main.py`: FastAPI app; `lifespan` opens one `AsyncMongoClient` (2 s server timeout) and stores a `PerturbationRepository` on `app.state`; `get_repository` dependency hands it to routes. `api/repository.py`: `PerturbationRepository(db, dataset)` with `ping()` and `get(name)` (find by `{dataset, name}`, `_id` dropped, returns dict). `api/models.py`: Pydantic `Health`, `TopGene`, `Neighbor`, `Similar`, `Perturbation`. Endpoints: `GET /health` (200 `{"status":"ok"}`; 503 when MongoDB unreachable), `GET /perturbations/{name}` (404 if unknown). Smoke run: `/health` 200; KLF1 → 50 top genes (HBZ first) + 20 + 20 similar (KLF1_BAK1 first); KLF1_BAK1 200; NOPE 404; `/docs` 200, lists both paths; server pointed at a dead port → `/health` 503 in 2.0 s | Done | `b7794c8` |
-| 5.3 | `api/repository.py`: `search(gene, limit)` (find by dataset [+ `top_genes.gene`], sort name, limit; positional projection `top_genes.$` returns only the matched gene → `gene_change`) and `similar(name, metric)` (projects only `similar.<metric>`; None if unknown). `api/models.py`: `Metric` (`Literal["euclidean", "edistance"]`), `PerturbationSummary`, `SimilarResponse`. `api/main.py`: `GET /perturbations?gene=&limit=` (default 50, 1–236 via `MAX_LIMIT`), `GET /perturbations/{name}/similar?metric=` (default `edistance`). Choices: list sorted by name; exact gene match (`hbz` → 0 results). Smoke run: no gene → 50, sorted; limit=236 → 236; gene=HBZ → 206, KLF1 change 1.416903; limit 0 / 237 and metric=foo → 422; NOPE similar → 404; KLF1 similar → 20, KLF1_BAK1 first (edistance 0.131292, euclidean 0.794458); `/openapi.json` lists 4 paths. `explain()`: list all → IXSCAN `dataset_1_name_1`, covered (0 docs examined); similar → IXSCAN `dataset_1_name_1` (1 examined). Gene search: planner picks per gene; across all 388 top genes, 359 use `top_genes.gene_1` (AHR: 1 examined, 1 returned), 29 very common genes (in > 50 docs, e.g. HBZ in 206) use `dataset_1_name_1` to skip the sort (236 examined). Never a full collection scan; no index change | Done | uncommitted |
-| 5.4 | API tests against a separate test database loaded from the tiny fixture | Pending | — |
+| 5.3 | `api/repository.py`: `search(gene, limit)` (find by dataset [+ `top_genes.gene`], sort name, limit; positional projection `top_genes.$` returns only the matched gene → `gene_change`) and `similar(name, metric)` (projects only `similar.<metric>`; None if unknown). `api/models.py`: `Metric` (`Literal["euclidean", "edistance"]`), `PerturbationSummary`, `SimilarResponse`. `api/main.py`: `GET /perturbations?gene=&limit=` (default 50, 1–236 via `MAX_LIMIT`), `GET /perturbations/{name}/similar?metric=` (default `edistance`). Choices: list sorted by name; exact gene match (`hbz` → 0 results). Smoke run: no gene → 50, sorted; limit=236 → 236; gene=HBZ → 206, KLF1 change 1.416903; limit 0 / 237 and metric=foo → 422; NOPE similar → 404; KLF1 similar → 20, KLF1_BAK1 first (edistance 0.131292, euclidean 0.794458); `/openapi.json` lists 4 paths. `explain()`: list all → IXSCAN `dataset_1_name_1`, covered (0 docs examined); similar → IXSCAN `dataset_1_name_1` (1 examined). Gene search: planner picks per gene; across all 388 top genes, 359 use `top_genes.gene_1` (AHR: 1 examined, 1 returned), 29 very common genes (in > 50 docs, e.g. HBZ in 206) use `dataset_1_name_1` to skip the sort (236 examined). Never a full collection scan; no index change | Done | `bb240d4` |
+| 5.4 | Per the [step 5.4 contract](PLAN.md#step-54-contract-api-integration-tests). `tests/conftest.py` (**new**): `tiny` session fixture moved from `test_parity.py` (one Spark run shared by parity and API tests) + `require_java()` (runs `java -version`; clear setup failure). `tests/test_api.py` (**new**): `mongo` (ping; clear failure if `MONGODB_URI` unset or server down), `api_db` (unique `minixell_test_<12 hex>`, loads fixture Spark output via `load_mongo.run` under `NormanWeissman2019` + decoy records under `DecoyDataset`: same names with shifted numbers, plus `DECOY_ONLY` and gene `DECOYGENE`; dropped in `finally`), function-scoped `client` (`TestClient`, real lifespan, `MONGODB_DB` set per test); expected values read straight from Spark Parquet, tolerance 1e-9. 38 tests: health 200 / 503 (dead port, shared MongoDB untouched); get for all 6 perturbations (single + combination; metadata, ranked genes, both neighbor lists, no `_id`); unknown + decoy-only → 404; list exact + sorted, `gene_change` null, limit prefix; every fixture gene's search exact with changes; unknown / wrong-case / decoy gene → []; limit 1 and 236 accepted, 0 / -1 / 237 / abc / 1.5 → 422; similar for 6 × 2 metrics (order, distances, no self), default edistance, unknown/decoy 404, bad metric 422. `test_parity.py`: fixture + `legacy_signatures` import removed; tests unchanged. Dev dependency `httpx` 0.28.1. Results: `pytest tests/test_api.py -v` twice → 38 passed (41 s, 41 s); full `pytest -v` → 55 passed (17 parity + 38 API), 0 skipped (Norman outputs present), 67 s; re-run after conftest fix → 55 passed, 76 s. Tamper (throwaway pytest plugin, no app edits): dataset-blind search + reversed similar lists → 18 failed, 20 passed. Setup failures: dead `MONGODB_URI` → "MongoDB unreachable at …" error in 2.5 s; `JAVA_HOME=/nonexistent` → "Java 17 not found (tried /nonexistent/bin/java)" (first run raised a raw `FileNotFoundError`; fixed with `except OSError`). Live smoke: throwaway `/tmp/minixell_smoke/prepare.py` ran Spark on the fixture and loaded `minixell_smoke_b2779bf2c431` (6 docs); `MONGODB_DB=minixell_smoke_b2779bf2c431 uv run --env-file .env uvicorn api.main:app --port 8010`; curl: `/health` 200; list 200 (6, sorted, null changes); `gene=KLF1&limit=3` 200 (BAK1 0.1225, CEBPE −0.1493, CEBPE_KLF1 0.8828); `gene=klf1` → []; `limit=0` 422; KLF1_BAK1 200; NOPE 404; KLF1 similar 200 edistance (KLF1_BAK1 0.3937 first), euclidean 200 (KLF1_BAK1 0.7175 first); `metric=cosine` 422; NOPE similar 404. Cleanup: server stopped, smoke DB dropped, `/tmp/minixell_smoke` removed; databases after every run: admin, config, local, minixell only; `minixell` 236 docs, content hash `b698d3fc71f2cff2` same before and after. Note: Starlette warns "Using `httpx` with `starlette.testclient` is deprecated; install `httpx2`"; contract names `httpx`, so not switched | Done (accepted 2026-10-26) | this commit; hash recorded at next update |
 | 5.5 | `.github/workflows/ci.yml`: lint, unit, API, parity on fixture (Java 17 + MongoDB service); green on GitHub. Blocker: no GitHub repo; ask user to create one or approve `gh repo create` + push | Pending | — |
 
 Docstring review (in `2e31555`): `pipeline/load_mongo.py` now uses Google-style
@@ -155,6 +156,10 @@ restyled.
 - pymongo 4.19.0 (`uv add pymongo`, step 5.1); the API uses its async
   client (Motor is deprecated).
 - fastapi 0.162.0, uvicorn 0.54.0 (`uv add fastapi uvicorn`, step 5.2).
+- httpx 0.28.1 as a dev dependency (`uv add --dev httpx`, step 5.4) for
+  FastAPI's `TestClient`.
+- Tests: `uv run --env-file .env pytest` needs Java and MongoDB running; API
+  tests use a throwaway `minixell_test_<random>` database, dropped after.
 - Java is scoped to the project: run project commands as
   `uv run --env-file .env <command>`. Plain `uv run` is fine for pure Python
   that doesn't start Spark or sbt.
