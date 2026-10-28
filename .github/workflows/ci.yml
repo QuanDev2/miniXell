@@ -1,0 +1,52 @@
+# Lint, API integration tests, and legacy-vs-Spark parity on the tiny fixture.
+# Clean runner: no .env, no Norman data, no existing database. Full-Norman parity tests skip.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        # Steps start only after this check reports healthy.
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'quit(db.runCommand({ping: 1}).ok ? 0 : 1)'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MONGODB_URI: mongodb://127.0.0.1:27017
+      SPARK_LOCAL_IP: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .python-version
+
+      - uses: actions/setup-java@v6  # sets JAVA_HOME
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: astral-sh/setup-uv@v10.3.2  # no floating major tag published
+
+      - name: Install dependencies from lockfile
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run --no-sync ruff check .
+
+      # One session: API and parity tests share one pipeline run on the tiny fixture.
+      - name: Tests
+        run: uv run --no-sync pytest -v -ra

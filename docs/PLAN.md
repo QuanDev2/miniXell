@@ -265,6 +265,102 @@ Finish READY FOR REVIEW; user acceptance closes the step. Do not start step 5.5.
 
 **Unresolved questions:** None.
 
+## Step 5.5 contract: GitHub CI
+
+**Revision:** 1.
+**Status:** APPROVED; local implementation and gated publication authorized.
+**User authorization:** "approve", then "ok dispatch it" (Lead-supervised
+dispatch): local implementation, the Ruff dev dependency, and the local checks
+below.
+**Publication authorization:** user selected "Create public repo and push":
+"Publish QuanDev2/miniXell and its tracked history publicly; after my review,
+commit step 5.5 changes and push for CI verification." Gate: Lead reviews the
+local changes and evidence first. Then create public `QuanDev2/miniXell`, set
+`origin`, commit only step 5.5 changes, push without force, observe the hosted
+run. No other publishing or cleanup.
+
+**Goal**
+
+Push or pull request → clean GitHub runner → lint, API integration tests, and
+legacy-versus-Spark parity checks. Catches broken changes off the laptop,
+without a local `.env`, downloaded Norman data, or existing database contents.
+CI only, no deployment.
+
+**Workflow behavior**
+
+- `.github/workflows/ci.yml`, triggered on `push` and `pull_request`, no
+  branch or path filters. One `ubuntu-24.04` job, `contents: read`.
+- Python 3.12 from `.python-version`, Java 17, uv; install from the committed
+  lockfile with `uv sync --locked`.
+- Temporary `mongo:8` service with a readiness check.
+  `MONGODB_URI=mongodb://127.0.0.1:27017`, `SPARK_LOCAL_IP=127.0.0.1`;
+  `JAVA_HOME` comes from the Java setup action. No laptop `.env`, no database
+  or cloud secrets.
+- Ruff as a dev dependency, rules limited to correctness: `E9`, `F63`, `F7`,
+  `F82`. No formatter, no style sweep.
+- Run `uv run --no-sync ruff check .`, then one
+  `uv run --no-sync pytest -v -ra`, so API and parity tests share the tiny
+  fixture's pipeline run. Both E-distance ways (plain Python and pandas)
+  stay covered. No new unit-test suite.
+- Any install, lint, or test failure fails the job. No suppressed errors,
+  `continue-on-error`, weakened assertions, or skips for missing Java/MongoDB.
+
+**Allowed changes**
+
+| Where | File | Change | Why |
+|---|---|---|---|
+| CI | .github/workflows/ci.yml | **New:** environment, MongoDB service, lint, tests. | Run checks on GitHub. |
+| Dependencies | pyproject.toml, uv.lock | Add dev dependency `ruff`; narrow rule configuration. | Correctness lint. |
+| Documentation | docs/PLAN.md, docs/PROGRESS.md | Contract here; execution log and hosted evidence in progress. | Keep handoff responsibilities separate. |
+
+No application, pipeline math, existing test assertion, tolerance, or
+sampling changes. A blocking code defect needs evidence and a scope amendment,
+not blanket ignores.
+
+**Acceptance criteria**
+
+- A clean checkout installs from the lockfile and succeeds on GitHub without a
+  Norman download or local setup files.
+- Every API test and tiny-fixture parity test runs and passes, both E-distance
+  ways included. Optional full-Norman tests may skip (outputs absent);
+  report the skips.
+- Tests use the existing unique disposable databases; no demo data touched.
+  The hosted MongoDB service is temporary.
+- A hosted run is observed succeeding through install, MongoDB readiness,
+  lint, and tests; record results, tested commit, and run URL. Local success
+  alone doesn't complete the step.
+- Failed CI reports failure; blocking merges needs repository policy, outside
+  this step.
+
+**Verification**
+
+Local, with existing Java and MongoDB:
+
+```bash
+uv sync --locked
+uv run --no-sync ruff check .
+uv run --no-sync --env-file .env pytest -v -ra
+```
+
+Expected: lint passes; existing suite has no regressions. Then, only after
+separate authorization: connect the repository, push, observe the hosted run,
+and fix workflow/environment issues within scope. No hosted run → verification
+blocked, not complete.
+
+**Exclusions**
+
+Deployment, cloud infrastructure, secrets, releases, branch protection,
+unrelated dependency upgrades or cleanup, and starting or changing shared
+local services.
+
+**Handoff and completion**
+
+The implementer records IN PROGRESS in [PROGRESS.md](PROGRESS.md) and owns the
+execution log until READY FOR REVIEW: work, exact commands and results, hosted
+URL and tested commit, blockers, commit hash or "uncommitted", and a link to
+this contract. READY FOR REVIEW only after hosted proof; user acceptance closes
+the step. Do not start Phase 6.
+
 ## Phase 6: Claude explain endpoint + demo page (1–1.5 days)
 
 **Build**
