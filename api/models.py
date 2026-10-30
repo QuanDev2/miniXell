@@ -47,3 +47,9 @@ class SimilarResponse(BaseModel):
     name: str
     metric: Metric
     neighbors: list[Neighbor]  # closest first
+
+
+class Explanation(BaseModel):
+    name: str
+    model: str  # Claude model that wrote the text
+    explanation: str

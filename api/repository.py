@@ -1,7 +1,8 @@
-"""Query perturbation documents in MongoDB for API routes and agent tools.
+"""Query perturbation and gene documents in MongoDB for API routes and agent tools.
 
-Documents come from pipeline/load_mongo.py, one per perturbation. Queries
-return plain dictionaries so each caller chooses its own validation.
+Perturbation documents come from pipeline/load_mongo.py, gene descriptions from
+pipeline/fetch_genes.py. Queries return plain dictionaries so each caller
+chooses its own validation.
 """
 
 from pymongo.asynchronous.database import AsyncDatabase
@@ -13,17 +14,19 @@ class PerturbationRepository:
 
     Attributes:
         collection: The perturbations collection in the configured database.
-        dataset: Published dataset label every query filters on.
+        genes: The genes collection holding public gene descriptions.
+        dataset: Published dataset label every perturbation query filters on.
     """
 
     def __init__(self, db: AsyncDatabase, dataset: str) -> None:
-        """Bind queries to a database's perturbations collection.
+        """Bind queries to a database's perturbations and genes collections.
 
         Args:
-            db: Database written by pipeline/load_mongo.py.
+            db: Database written by pipeline/load_mongo.py and fetch_genes.py.
             dataset: Published dataset label, such as NormanWeissman2019.
         """
         self.collection = db["perturbations"]
+        self.genes = db["genes"]
         self.dataset = dataset
 
     async def ping(self) -> bool:
@@ -90,3 +93,16 @@ class PerturbationRepository:
             {"dataset": self.dataset, "name": name}, {"_id": 0, f"similar.{metric}": 1}
         )
         return None if doc is None else doc["similar"][metric]
+
+    async def descriptions(self, symbols: list[str]) -> dict[str, dict]:
+        """Fetch stored descriptions for a list of genes.
+
+        Args:
+            symbols: Gene names as the dataset spells them, such as HBG1.
+
+        Returns:
+            Each stored symbol mapped to its document without _id. Symbols
+            never fetched are absent; fetched ones may have a null summary.
+        """
+        cursor = self.genes.find({"symbol": {"$in": symbols}}, {"_id": 0})
+        return {doc["symbol"]: doc async for doc in cursor}

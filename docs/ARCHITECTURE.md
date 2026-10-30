@@ -204,18 +204,28 @@ Rules:
 
 #### Collection `genes` (phase 6)
 
-Public gene descriptions used to ground Claude's explanations.
+Public gene descriptions used to ground Claude's explanations. One document per
+gene in any perturbation's top genes (388 in Norman), loaded by
+`pipeline/fetch_genes.py`.
 
 ```json
 {
   "_id": "ObjectId(…)",
-  "symbol": "HBG1",
-  "full_name": "hemoglobin subunit gamma 1",
+  "symbol": "HIST1H4C",
+  "current_symbol": "H4C3",
+  "full_name": "H4 clustered histone 3",
   "summary": "One-paragraph description from NCBI Gene…",
   "source": "mygene.info",
-  "fetched_at": "2026-10-20T00:00:00Z"
+  "fetched_at": "2026-10-29T00:00:00Z"
 }
 ```
+
+| Field | Meaning |
+|---|---|
+| `symbol` | Gene name as the dataset spells it; matches `top_genes.gene` |
+| `current_symbol` | Today's official name (differs for 16 renamed genes); null if not found |
+| `full_name`, `summary` | From NCBI Gene via mygene.info; `summary` null when none exists (16 genes) |
+| `source`, `fetched_at` | Where and when the description was fetched |
 
 | Index | Serves |
 |---|---|

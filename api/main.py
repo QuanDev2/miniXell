@@ -1,11 +1,13 @@
-"""Serve perturbation documents from MongoDB over HTTP.
+"""Serve perturbation documents from MongoDB over HTTP, plus Claude explanations.
 
 Each route queries PerturbationRepository and returns the stored document,
-validated against a Pydantic response model.
+validated against a Pydantic response model. The explain route also sends the
+stored facts to Claude.
 
 MONGODB_URI selects the server (required). MONGODB_DB selects the database
-(default minixell, the database pipeline/load_mongo.py writes). Run with
-`uv run --env-file .env uvicorn api.main:app`.
+(default minixell, the database pipeline/load_mongo.py writes).
+ANTHROPIC_API_KEY enables the explain route; CLAUDE_MODEL and CLAUDE_EFFORT
+override its defaults. Run with `uv run --env-file .env uvicorn api.main:app`.
 """
 
 import os
@@ -13,36 +15,47 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
 
+import anthropic
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pymongo import AsyncMongoClient
 
-from api.models import Health, Metric, Perturbation, PerturbationSummary, SimilarResponse
+from api.explain import build_prompt, explain
+from api.models import Explanation, Health, Metric, Perturbation, PerturbationSummary, SimilarResponse
 from api.repository import PerturbationRepository
 
 DEFAULT_DB = "minixell"  # same database pipeline/load_mongo.py writes
 DATASET = "NormanWeissman2019"
 SERVER_TIMEOUT_MS = 2_000  # fail fast when MongoDB is down
 MAX_LIMIT = 236  # perturbations in the Norman dataset
+DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_EFFORT = "high"
+CLAUDE_TIMEOUT_S = 120
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Hold one MongoDB client open for the application's lifetime.
+    """Hold one MongoDB client and one Claude client open for the app's lifetime.
 
     Args:
-        app: Application whose state receives the shared repository.
+        app: Application whose state receives the shared repository and Claude
+            client.
 
     Yields:
-        Control to FastAPI while the application serves requests. The client
-        closes on shutdown.
+        Control to FastAPI while the application serves requests. Both
+        clients close on shutdown.
 
     Raises:
         KeyError: MONGODB_URI is absent from the environment.
     """
     client = AsyncMongoClient(os.environ["MONGODB_URI"], serverSelectionTimeoutMS=SERVER_TIMEOUT_MS)
     app.state.repository = PerturbationRepository(client[os.environ.get("MONGODB_DB", DEFAULT_DB)], DATASET)
+    # No key (as in CI): the explain route answers 503 instead of failing startup.
+    claude = anthropic.AsyncAnthropic(timeout=CLAUDE_TIMEOUT_S) if os.environ.get("ANTHROPIC_API_KEY") else None
+    app.state.claude = claude
     yield
     await client.close()
+    if claude is not None:
+        await claude.close()
 
 
 app = FastAPI(title="miniXell", lifespan=lifespan)
@@ -141,3 +154,39 @@ async def get_similar(name: str, repository: Repository, metric: Metric = "edist
     if neighbors is None:
         raise HTTPException(status_code=404, detail=f"perturbation {name!r} not found")
     return SimilarResponse(name=name, metric=metric, neighbors=neighbors)
+
+
+@app.post("/perturbations/{name}/explain")
+async def explain_perturbation(name: str, repository: Repository, request: Request) -> Explanation:
+    """Explain one perturbation's top genes in plain English with Claude.
+
+    Claude sees only the stored top genes, their changes, and their public
+    descriptions. Its text is returned unchecked; the gene guardrail is
+    separate.
+
+    Args:
+        name: Published perturbation label, such as KLF1.
+        repository: Shared query layer injected by get_repository.
+        request: Incoming request, used to reach the shared Claude client.
+
+    Returns:
+        The explanation and the Claude model that wrote it.
+
+    Raises:
+        HTTPException: 404 when the perturbation is unknown; 503 when no
+            ANTHROPIC_API_KEY is configured or the Claude call fails.
+    """
+    claude = request.app.state.claude
+    if claude is None:
+        raise HTTPException(status_code=503, detail="Claude not configured: set ANTHROPIC_API_KEY")
+    doc = await repository.get(name)
+    if doc is None:
+        raise HTTPException(status_code=404, detail=f"perturbation {name!r} not found")
+    descriptions = await repository.descriptions([g["gene"] for g in doc["top_genes"]])
+    model = os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL)
+    effort = os.environ.get("CLAUDE_EFFORT", DEFAULT_EFFORT)
+    try:
+        text = await explain(claude, model, effort, build_prompt(doc, descriptions))
+    except (anthropic.APIError, ValueError) as e:
+        raise HTTPException(status_code=503, detail=f"Claude call failed: {e}") from e
+    return Explanation(name=name, model=model, explanation=text)

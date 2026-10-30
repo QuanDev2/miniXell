@@ -11,11 +11,13 @@ Last updated: 2026-10-29.
 - **Done:** Phase 0, Phase 1, Phase 2, Phase 3 (step 3.7 skipped by user),
   Phase 4 (benchmarks dropped, Scala way 4.4 skipped for now by user),
   Phase 5 (step 5.5 accepted by user 2026-10-29: "commit").
-  Last commit: `5217b57` (step 5.5 evidence). Remote: public
-  `QuanDev2/miniXell` (`origin`); CI runs on every push.
-- **Next:** Phase 6 (Claude explain endpoint + demo page). Define steps,
-  settle Claude access (Anthropic API vs Bedrock), brief the user high level,
-  wait for an explicit go per step.
+  Remote: public `QuanDev2/miniXell` (`origin`); CI runs on every push.
+  Last commit: `effbef4` (CI MongoDB pin).
+- **In progress:** Phase 6 (Claude explain endpoint + demo page). Steps
+  6.1–6.3 done, uncommitted (`pyproject.toml`, `uv.lock`,
+  `pipeline/fetch_genes.py`, `api/`, `docs/ARCHITECTURE.md`, this file). User
+  deleted `.env.example` after pasting the key into it; template not recreated.
+- **Next:** user review of 6.1–6.3, then brief 6.4.
 
 ## Phase 0: Toolchain and skeleton (done)
 
@@ -146,6 +148,33 @@ Older files (`pipeline/convert.py`, `download.py`, `legacy_signatures.py`,
 `spark_signatures.py`, `tests/`) still use `In:`/`Out:`/`State:`; not
 restyled.
 
+CI fix after acceptance (user: "Fix A"): GitHub's ubuntu-24.04 image moved
+20261012 → 20261025 (kernel 6.19+); `mongo:8` (8.3.13) refused to start
+("Linux kernel versions 6.19 and newer has a known incompatibility", MongoDB
+SERVER-121912; SERVER-136272: 8.3/9.0 fail, 8.2 boots). Run
+https://github.com/QuanDev2/miniXell/actions/runs/40979222561 on `17f8b23`
+failed at "Initialize containers". Pinned service to `mongo:8.2` in `effbef4`;
+run https://github.com/QuanDev2/miniXell/actions/runs/40979723800 on image
+20261025.353.1, MongoDB 8.2.12: success, 47 passed, 8 skipped. Local Docker
+stays on 8.3.13.
+
+## Phase 6: Claude explain endpoint + demo page (in progress)
+
+Claude access: Anthropic API key (user's call, 2026-10-29), not Bedrock.
+Default model `claude-haiku-5-5` at effort `high` (user's call, changed from
+`max`); the explain endpoint reads optional `CLAUDE_MODEL` / `CLAUDE_EFFORT`
+overrides (6.3). Haiku's thinking counts toward `max_tokens`
+(Anthropic effort docs).
+Tests and CI use a fake Claude; no key in CI.
+
+| Step | What | Status | Commit |
+|---|---|---|---|
+| 6.1 | `uv add anthropic` (2.3.0); key in `.env` (user). Throwaway smoke call `/tmp/minixell_claude_smoke.py` (deleted after): KLF1's top 10 genes from Spark Parquet → `claude-haiku-5-5`, effort `high`, `max_tokens` 16,000. Result: 4.3 s, 175 input / 874 output tokens (incl. thinking), `end_turn`; 3-sentence answer naming 9 genes (HBZ, HBG2, HBG1, HBA1, BLVRB, TMSB10, EMP3, PNMT, GAL), all in the input list; reads KLF1 as driving the erythroid/fetal globin program, flags direct vs downstream as undecidable. `.env.example` created, then deleted by the user (key had been pasted into it); not committed | Done | uncommitted |
+| 6.2 | `pipeline/fetch_genes.py` (**new**): `top_gene_symbols` (distinct `top_genes.gene`, 388) → `query_mygene` (POST `mygene.info/v3/query`, human, fields symbol/name/summary; exact-symbol match wins, else top score) by `symbol`, then unfound genes by `alias,ensembl.gene,accession` → `build_documents` (`symbol` = dataset spelling, `current_symbol`, `full_name`, `summary`, `source`, `fetched_at`; nulls when missing) → `bulk_write` `ReplaceOne` upsert by symbol (not the briefed delete-then-insert: no empty window, other datasets' genes kept) + unique `{symbol: 1}`. Run: `uv run --env-file .env python -m pipeline.fetch_genes norman` (~2.4 s). Result: 360 by symbol, 16 by former name (e.g. C10orf54 → VSIR, HIST1H4C → H4C3), 12 not found (unnamed `RP11-…`/`AC…` IDs), 372 with a description (4 found without one, e.g. IER5L); HBD's two hits → exact match. Re-run: 388 written, 0 new. `explain()` by symbol → EXPRESS_IXSCAN `symbol_1`, 1 doc examined. `perturbations` untouched (236). Ruff passes. ARCHITECTURE.md `genes` schema: field table, `current_symbol`, nullable `summary` | Done | uncommitted |
+| 6.3 | `api/explain.py` (**new**): `SYSTEM` prompt (explain only the given data, name only listed genes, no new numbers, no guessing for undescribed genes, flag what the data can't answer, one 4–6 sentence paragraph), `build_prompt` (perturbation, targets, cell count, then rank. gene (change): description or "No description available."), `explain` (one `messages.create`, `output_config.effort`, `max_tokens` 16,000, text blocks only; empty → `ValueError`). `api/repository.py`: `genes` collection + `descriptions(symbols)`. `api/models.py`: `Explanation` (name, model, explanation). `api/main.py`: `lifespan` makes one `AsyncAnthropic` (120 s timeout) only when `ANTHROPIC_API_KEY` is set; `POST /perturbations/{name}/explain` (404 unknown; 503 no key or Claude error); `CLAUDE_MODEL` / `CLAUDE_EFFORT` env overrides (defaults `claude-haiku-5-5`, `high`). Smoke run (uvicorn, real Claude): KLF1 200 in 7.6 s (166 words, 14 genes named), CEBPE_KLF1 200 in 9.0 s (153 words, 14), JUN 200 in 11.2 s (151 words, 17); throwaway check: every named gene is in that perturbation's top genes or targets; NOPE → 404. No key (TestClient) → 503 "Claude not configured". `/openapi.json` lists the route. Ruff passes; full suite 55 passed (138 s). No tests added (fake-Claude tests are 6.4) | Done | uncommitted |
+| 6.4 | Guardrail (reject genes absent from signature/descriptions) + tests with a fake Claude, incl. planted made-up gene | Pending | — |
+| 6.5 | Demo page `api/static/index.html` served by FastAPI; checked in a real browser | Pending | — |
+
 ## Environment (this machine)
 
 - Apple M4, 24 GB RAM, 10 cores, macOS.
@@ -163,10 +192,12 @@ restyled.
 - Java is scoped to the project: run project commands as
   `uv run --env-file .env <command>`. Plain `uv run` is fine for pure Python
   that doesn't start Spark or sbt.
-- `.env` is git-ignored. Keys:
+- `.env` is git-ignored; no committed template. Keys:
   - `JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`
   - `MONGODB_URI=mongodb://localhost:27017`
   - `SPARK_LOCAL_IP=127.0.0.1`
+  - `ANTHROPIC_API_KEY` (step 6.1; user adds it)
+- anthropic 2.3.0 (`uv add anthropic`, step 6.1).
 - MongoDB: `docker compose up -d`; container `minixell-mongo`, MongoDB
   8.3.13, `127.0.0.1:27017`, volume `minixell_mongo-data`.
   Database `minixell` (step 5.1).
@@ -219,7 +250,7 @@ restyled.
 
 ## Open items
 
-- Claude access (Anthropic API vs Bedrock): decide in phase 6.
+- Claude access: decided 2026-10-29, Anthropic API (see Phase 6).
 - PySpark 4.2.0 warns it doesn't fully support pandas ≥ 3.0 (installed via
   anndata). Worked so far: `toPandas` (step 2.3), `pandas_udf` with nested
   arrays (step 4.3). Only the warning is printed.
@@ -280,4 +311,7 @@ Details that matter for correctness:
   do), with .NET analogies. No detailed code unless the user asks.
 - Docstrings: Google style (`Args:` / `Returns:` / `Yields:` / `Raises:` /
   `Warning:`) for all new or edited code; `In:`/`Out:`/`State:` is retired
-  (user's call, 2026-10-25). Rule lives in the global AGENTS.md.
+  (user's call, 2026-10-25). The global AGENTS.md no longer covers
+  docstrings; this repo keeps Google style (user's call, 2026-10-29).
+  Inline `#` comments: one 80-col line, max 2 (global AGENTS.md).
+- Tone: terse, senior-engineer style; no chit-chat (user's call, 2026-10-29).
