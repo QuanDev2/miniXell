@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 30
     services:
       mongo:
-        image: mongo:8
+        image: mongo:8.2  # 8.3 refuses to start on kernel 6.19+ (MongoDB SERVER-121912, SERVER-136272)
         ports:
           - 27017:27017
         # Steps start only after this check reports healthy.
