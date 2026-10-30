@@ -147,7 +147,7 @@ dataset. The job log's stage times are the only timings. Scala way deferred
 
 **Interview line**: "Ported the heaviest calculation to PySpark two ways, row-by-row and batched, and proved both match the reference."
 
-## Phase 5: MongoDB + FastAPI + CI (1 day)
+## Phase 5: MongoDB + FastAPI + CI (done)
 
 **Build**
 - `pipeline/load_mongo.py`: one document per perturbation (see ARCHITECTURE.md);
